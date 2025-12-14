@@ -88,8 +88,12 @@ class RobotServer:
         finally:
             self.clients.discard(websocket)
             print(f"📱 Client {client_addr} removed (remaining: {len(self.clients)})")
+            # Only enter safe mode if ALL clients disconnected
             if len(self.clients) == 0:
+                print("⚠️ All clients disconnected - entering safe mode")
                 self._safe_mode()
+            else:
+                print(f"   ✓ {len(self.clients)} client(s) still connected - robot remains active")
 
     async def _handle_message(self, websocket, message: str):
         try:

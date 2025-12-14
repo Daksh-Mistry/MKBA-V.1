@@ -61,9 +61,14 @@ class AutoController:
             self.ws = ws
             video_url = f"http://{self.cfg.host}:{self.cfg.video_port}/video.mjpg?res=640x480&fps=30"
             print(f"📹 Connecting to video stream: {video_url}")
-            cap = cv2.VideoCapture(video_url)
-            # Set timeout to prevent hanging
+            cap = cv2.VideoCapture(video_url, cv2.CAP_FFMPEG)
+            # Set timeout and buffer settings to prevent hanging
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get latest frame
+            # Try to set timeout (may not work on all systems)
+            try:
+                cap.set(cv2.CAP_PROP_TIMEOUT, 5000)  # 5 second timeout
+            except:
+                pass
             if not cap.isOpened():
                 print(f"❌ Failed to open video stream")
                 return
@@ -132,21 +137,20 @@ class AutoController:
             error_x = det["cx"] - 0.5
             error_y = det["cy"] - 0.5
             # Aim servos based on error
-            # FIXED: Servos are reversed, so reverse deltas
-            pan_delta = int(-self.cfg.aim_kp * error_x * 1000)  # Reversed
-            tilt_delta = int(-self.cfg.aim_kp * error_y * 1000)  # Reversed
+            # Pan is reversed, tilt is reversed
+            pan_delta = int(-self.cfg.aim_kp * error_x * 1000)  # Pan reversed
+            tilt_delta = int(-self.cfg.aim_kp * error_y * 1000)  # Tilt reversed
             await self.send({"type": "servo_delta", "pan_delta": pan_delta, "tilt_delta": tilt_delta})
 
             # Movement: drive forward if centered enough
-            # FIXED: Motors are wired backwards, so swap left/right
+            # FIXED: Motors are completely inverted (all values negated)
             center_err = math.hypot(error_x, error_y)
             forward = max(0.0, 1.0 - center_err * 3.0) * self.cfg.move_k
-            left = right = forward
-            # small steering
-            left -= error_x * 0.6
-            right += error_x * 0.6
-            # Swap left/right for backwards motor wiring
-            await self.send({"type": "drive", "left": right, "right": left})
+            left = right = -forward  # Inverted (negative = forward)
+            # small steering (inverted)
+            left += error_x * 0.6
+            right -= error_x * 0.6
+            await self.send({"type": "drive", "left": left, "right": right})
 
             # Pump heuristic
             pump_on = det["area"] >= self.cfg.pump_area_thr

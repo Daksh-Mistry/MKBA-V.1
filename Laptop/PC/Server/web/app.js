@@ -129,6 +129,7 @@ function connect() {
           console.log("👋 Server hello received:", data);
           console.log("✅ Connection established! Waiting for status updates...");
         } else if (data.type === "chat_response") {
+          console.log("💬 Chat response received:", data.message);
           addChatMessage(data.message, false);
         } else {
           console.log("📨 Received:", data.type, data);
@@ -209,14 +210,58 @@ function handleKeys() {
     handleKeys._logged = true;
   }
 
+  // COMPLETELY REWRITTEN MOTOR CONTROL - Simple tank drive logic
+  // Based on user feedback: motors are inverted (negative = forward, positive = backward)
+  // W=forward, S=backward, A=left turn, D=right turn
+  
   let left = 0;
   let right = 0;
-  // movement - FIXED: Motors are wired backwards, so swap left/right
-  // W=forward, S=backward, A=left turn, D=right turn
-  if (keys.has("KeyW")) { right += 1; left += 1; }      // Forward (swapped)
-  if (keys.has("KeyS")) { right -= 1; left -= 1; }      // Backward (swapped)
-  if (keys.has("KeyA")) { right -= 0.5; left += 0.5; }  // Left turn (swapped)
-  if (keys.has("KeyD")) { right += 0.5; left -= 0.5; }  // Right turn (swapped)
+  
+  // Forward/Backward (base movement)
+  if (keys.has("KeyW")) {
+    // Forward: both motors forward (negative for inverted motors)
+    left = -1.0;
+    right = -1.0;
+  } else if (keys.has("KeyS")) {
+    // Backward: both motors backward (positive for inverted motors)
+    left = 1.0;
+    right = 1.0;
+  }
+  
+  // Turning (modifies base movement or creates turn in place)
+  if (keys.has("KeyA")) {
+    // Left turn: reduce left motor, increase right motor
+    // For inverted: if forward (negative), make left less negative (add), right more negative (subtract)
+    // If backward (positive), make left more positive (add), right less positive (subtract)
+    if (left < 0) {
+      // Currently forward - turn left by reducing left motor speed
+      left += 0.5;
+      right -= 0.5;
+    } else if (left > 0) {
+      // Currently backward - turn left by increasing left motor speed
+      left += 0.5;
+      right -= 0.5;
+    } else {
+      // Not moving - turn in place left
+      left = 0.5;
+      right = -0.5;
+    }
+  } else if (keys.has("KeyD")) {
+    // Right turn: increase left motor, reduce right motor
+    if (left < 0) {
+      // Currently forward - turn right by reducing right motor speed
+      left -= 0.5;
+      right += 0.5;
+    } else if (left > 0) {
+      // Currently backward - turn right by increasing right motor speed
+      left -= 0.5;
+      right += 0.5;
+    } else {
+      // Not moving - turn in place right
+      left = -0.5;
+      right = 0.5;
+    }
+  }
   
   // speed modifiers
   let scalar = 1.0;
@@ -231,15 +276,15 @@ function handleKeys() {
   }
 
   // servos - continuous movement with deltas (throttled to reduce noise)
-  // FIXED: Servos are reversed, so reverse all deltas
+  // FIXED: Pan was reversed, tilt is reversed
   // Left arrow = pan left, Right arrow = pan right, Up = tilt up, Down = tilt down
   const now = Date.now();
   let panDelta = 0;
   let tiltDelta = 0;
   if (keys.has("ArrowLeft")) panDelta += 50;   // Pan left (reversed: increase pan value)
   if (keys.has("ArrowRight")) panDelta -= 50;  // Pan right (reversed: decrease pan value)
-  if (keys.has("ArrowUp")) tiltDelta += 80;    // Tilt up (reversed: increase tilt value) - increased to 80 for stronger movement
-  if (keys.has("ArrowDown")) tiltDelta -= 80;   // Tilt down (reversed: decrease tilt value) - increased to 80 for stronger movement
+  if (keys.has("ArrowUp")) tiltDelta -= 80;    // Tilt up (reversed: decrease tilt value) - increased to 80 for stronger movement
+  if (keys.has("ArrowDown")) tiltDelta += 80;   // Tilt down (reversed: increase tilt value) - increased to 80 for stronger movement
   if (panDelta || tiltDelta) {
     // Throttle servo commands to reduce noise but keep them continuous
     if (now - lastServoSend >= SERVO_THROTTLE_MS) {
@@ -395,9 +440,12 @@ if (chatSend && chatText) {
   chatSend.addEventListener("click", () => {
     const msg = chatText.value.trim();
     if (msg && ws && ws.readyState === WebSocket.OPEN) {
+      console.log("💬 Sending chat message:", msg);
       addChatMessage(msg, true);
       send({ type: "chat", message: msg });
       chatText.value = "";
+    } else {
+      console.warn("⚠️ Cannot send chat - WebSocket not open. State:", ws?.readyState);
     }
   });
 
