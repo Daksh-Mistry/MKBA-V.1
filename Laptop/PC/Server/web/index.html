@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robo 2.0 Control</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">Robo 2.0 Control</div>
+      <div class="status">
+        <span>
+          <label>Pi IP: </label>
+          <input type="text" id="host-input" placeholder="robo.local or IP" style="width:120px;padding:2px 4px;background:#232a36;border:1px solid #2f3745;color:#e8ecf0;margin-right:8px;" />
+          <button id="connect-btn" style="padding:2px 8px;background:#2b7cff;border:none;color:white;cursor:pointer;">Connect</button>
+        </span>
+        <span id="conn">Disconnected</span>
+        <span id="mode">Manual</span>
+        <span id="speed">1.0x</span>
+      </div>
+    </header>
+    <main>
+      <section id="video-pane">
+        <div id="video-toolbar">
+          <button data-res="640x480">640x480</button>
+          <button data-res="1280x720">1280x720</button>
+          <button id="mode-toggle">Toggle Mode</button>
+        </div>
+        <img id="video" alt="Video feed" />
+      </section>
+      <section id="right-pane">
+        <div class="panel">
+          <h3>AI Chat (stub)</h3>
+          <div id="chat-log"></div>
+          <div class="chat-input">
+            <input id="chat-text" placeholder="Type message..." />
+            <button id="chat-send">Send</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <div id="sensor-panel">
+        <div>Flame: <span id="flame"></span></div>
+        <div>IR: <span id="ir"></span></div>
+        <div>Pump: <span id="pump"></span></div>
+        <div>Servos: <span id="servos"></span></div>
+      </div>
+      <div id="controls-hint">
+        WASD move · Arrows pan/tilt · Space pump · Shift/Ctrl speed · M mode · Esc stop
+      </div>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+ </html>
+
