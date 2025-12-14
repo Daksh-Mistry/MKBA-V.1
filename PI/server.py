@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from contextlib import suppress
 from typing import Any, Dict
 
@@ -107,13 +108,12 @@ class RobotServer:
                 left = float(data.get("left", 0))
                 right = float(data.get("right", 0))
                 self._drive(left, right)
-                # Only log when actually moving (reduce noise)
+                # Always log drive commands for debugging
                 if abs(left) > 0.01 or abs(right) > 0.01:
-                    if not hasattr(self, '_drive_log_count'):
-                        self._drive_log_count = 0
-                    self._drive_log_count += 1
-                    if self._drive_log_count % 5 == 0:  # Log every 5th command
-                        print(f"   → Driving: L={left:.2f}, R={right:.2f}")
+                    print(f"🚗 Drive command: left={left:.2f}, right={right:.2f}")
+                elif not hasattr(self, '_last_stop_log') or (time.time() - self._last_stop_log) > 2:
+                    print(f"🛑 Stop command received")
+                    self._last_stop_log = time.time()
             elif kind == "servo":
                 pan = int(data.get("pan", self.servos.pan))
                 tilt = int(data.get("tilt", self.servos.tilt))

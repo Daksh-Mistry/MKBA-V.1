@@ -55,7 +55,6 @@ function connect() {
     
     ws.onopen = (event) => {
       console.log("✅ WebSocket connected successfully!");
-      console.log("   Ready state:", ws.readyState);
       isConnecting = false;
       connEl.textContent = `Connected (${host})`;
       connEl.style.color = "#4caf50";
@@ -127,7 +126,9 @@ function connect() {
           }
         } else if (data.type === "hello") {
           console.log("👋 Server hello received:", data);
-          console.log("✅ Connection established! Waiting for status updates...");
+          console.log("✅ Connection established!");
+          // Load video after connection confirmed
+          setVideo("640x480", 30);
         } else if (data.type === "chat_response") {
           console.log("💬 Chat response received:", data.message);
           addChatMessage(data.message, false);
@@ -147,16 +148,32 @@ function connect() {
 }
 
 function setVideo(res = "640x480", fps = 30) {
-  const videoUrl = `http://${host}:${videoPort}/video.mjpg?res=${res}&fps=${fps}`;
-  console.log("Loading video:", videoUrl);
-  videoEl.src = videoUrl;
-  videoEl.onerror = () => {
-    console.error("Video load error - check Pi server and camera");
-    videoEl.alt = "Video error - check connection";
-  };
-  videoEl.onload = () => {
-    console.log("Video loaded successfully");
-  };
+  if (!videoEl) {
+    console.error("❌ Video element not found!");
+    return;
+  }
+  
+  // Build URL with timestamp to force reload
+  const videoUrl = `http://${host}:${videoPort}/video.mjpg?res=${res}&fps=${fps}&_=${Date.now()}`;
+  console.log("📹 Setting video URL:", videoUrl);
+  
+  // Force reload by clearing first
+  videoEl.src = "";
+  
+  // Set new URL after brief delay
+  setTimeout(() => {
+    videoEl.src = videoUrl;
+    videoEl.alt = "Loading video...";
+    
+    videoEl.onerror = () => {
+      console.error("❌ Video failed to load");
+      videoEl.alt = "Video error";
+    };
+    
+    videoEl.onload = () => {
+      console.log("✅ Video loaded");
+    };
+  }, 50);
 }
 
 function send(obj) {
@@ -210,81 +227,80 @@ function handleKeys() {
     handleKeys._logged = true;
   }
 
-  // COMPLETELY REWRITTEN MOTOR CONTROL - Simple tank drive logic
-  // Based on user feedback: motors are inverted (negative = forward, positive = backward)
-  // W=forward, S=backward, A=left turn, D=right turn
+  // MOTOR CONTROL - Map based on user's observed behavior
+  // User observed: W→right, S→left, D→forward, A→backward
+  // This means current mapping is: W=right turn, S=left turn, D=forward, A=backward
+  // So we need to REMAP: W should send what D currently sends, etc.
   
   let left = 0;
   let right = 0;
   
-  // Forward/Backward (base movement)
-  if (keys.has("KeyW")) {
-    // Forward: both motors forward (negative for inverted motors)
+  const w = keys.has("KeyW");
+  const s = keys.has("KeyS");
+  const a = keys.has("KeyA");
+  const d = keys.has("KeyD");
+  
+  // Map based on what SHOULD happen:
+  // W should be forward → send what D currently does (both motors same direction)
+  // S should be backward → send what A currently does (both motors opposite)
+  // A should be left turn → send what S currently does
+  // D should be right turn → send what W currently does
+  
+  // Current behavior: W=right, S=left, D=forward, A=backward
+  // So: D sends forward (both +1 or both -1), A sends backward
+  // W sends right turn (left forward, right backward), S sends left turn
+  
+  // NEW MAPPING: Swap the commands
+  if (w && !s) {
+    // W should be FORWARD → use what D was doing (both motors forward)
+    // Try both negative first (inverted motors)
     left = -1.0;
     right = -1.0;
-  } else if (keys.has("KeyS")) {
-    // Backward: both motors backward (positive for inverted motors)
+    if (a) { left = -0.3; }  // Turn left while forward
+    if (d) { right = -0.3; } // Turn right while forward
+  } else if (s && !w) {
+    // S should be BACKWARD → use what A was doing
     left = 1.0;
     right = 1.0;
+    if (a) { left = 0.3; }
+    if (d) { right = 0.3; }
+  } else if (a && !d && !w && !s) {
+    // A should be LEFT TURN → use what S was doing (left backward, right forward)
+    left = 1.0;   // Left backward
+    right = -1.0; // Right forward
+  } else if (d && !a && !w && !s) {
+    // D should be RIGHT TURN → use what W was doing (left forward, right backward)
+    left = -1.0; // Left forward
+    right = 1.0;  // Right backward
   }
   
-  // Turning (modifies base movement or creates turn in place)
-  if (keys.has("KeyA")) {
-    // Left turn: reduce left motor, increase right motor
-    // For inverted: if forward (negative), make left less negative (add), right more negative (subtract)
-    // If backward (positive), make left more positive (add), right less positive (subtract)
-    if (left < 0) {
-      // Currently forward - turn left by reducing left motor speed
-      left += 0.5;
-      right -= 0.5;
-    } else if (left > 0) {
-      // Currently backward - turn left by increasing left motor speed
-      left += 0.5;
-      right -= 0.5;
-    } else {
-      // Not moving - turn in place left
-      left = 0.5;
-      right = -0.5;
-    }
-  } else if (keys.has("KeyD")) {
-    // Right turn: increase left motor, reduce right motor
-    if (left < 0) {
-      // Currently forward - turn right by reducing right motor speed
-      left -= 0.5;
-      right += 0.5;
-    } else if (left > 0) {
-      // Currently backward - turn right by increasing right motor speed
-      left -= 0.5;
-      right += 0.5;
-    } else {
-      // Not moving - turn in place right
-      left = -0.5;
-      right = 0.5;
-    }
-  }
-  
-  // speed modifiers
+  // Speed modifiers
   let scalar = 1.0;
   if (keys.has("ShiftLeft") || keys.has("ShiftRight")) scalar = 1.3;
   if (keys.has("ControlLeft") || keys.has("ControlRight")) scalar = 0.7;
   send({ type: "speed_scalar", value: scalar });
   
+  // Always send drive command
+  send({ type: "drive", left, right });
+  
+  // Debug logging
   if (left !== 0 || right !== 0) {
-    send({ type: "drive", left, right });
-  } else {
-    send({ type: "drive", left: 0, right: 0 });
+    if (!handleKeys._lastLog || Date.now() - handleKeys._lastLog > 500) {
+      console.log(`🚗 Drive: L=${left.toFixed(2)}, R=${right.toFixed(2)} (W=${w} S=${s} A=${a} D=${d})`);
+      handleKeys._lastLog = Date.now();
+    }
   }
 
   // servos - continuous movement with deltas (throttled to reduce noise)
-  // FIXED: Pan was reversed, tilt is reversed
+  // Pan is reversed, tilt is NOT reversed (user said servos were working perfectly before)
   // Left arrow = pan left, Right arrow = pan right, Up = tilt up, Down = tilt down
   const now = Date.now();
   let panDelta = 0;
   let tiltDelta = 0;
   if (keys.has("ArrowLeft")) panDelta += 50;   // Pan left (reversed: increase pan value)
   if (keys.has("ArrowRight")) panDelta -= 50;  // Pan right (reversed: decrease pan value)
-  if (keys.has("ArrowUp")) tiltDelta -= 80;    // Tilt up (reversed: decrease tilt value) - increased to 80 for stronger movement
-  if (keys.has("ArrowDown")) tiltDelta += 80;   // Tilt down (reversed: increase tilt value) - increased to 80 for stronger movement
+  if (keys.has("ArrowUp")) tiltDelta -= 80;    // Tilt up (REVERSED: decrease tilt value) - increased to 80 for stronger movement
+  if (keys.has("ArrowDown")) tiltDelta += 80;   // Tilt down (REVERSED: increase tilt value) - increased to 80 for stronger movement
   if (panDelta || tiltDelta) {
     // Throttle servo commands to reduce noise but keep them continuous
     if (now - lastServoSend >= SERVO_THROTTLE_MS) {
@@ -396,9 +412,14 @@ window.addEventListener("beforeunload", () => {
   }
 });
 
-// init
-connect();
-setVideo("640x480", 30);
+// Initialize immediately
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    connect();
+  });
+} else {
+  connect();
+}
 
 modeToggleBtn.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
