@@ -59,14 +59,32 @@ class AutoController:
         uri = f"ws://{self.cfg.host}:{self.cfg.ws_port}"
         async with websockets.connect(uri) as ws:
             self.ws = ws
-            cap = cv2.VideoCapture(
-                f"http://{self.cfg.host}:{self.cfg.video_port}/video.mjpg?res=640x480&fps=30"
-            )
+            video_url = f"http://{self.cfg.host}:{self.cfg.video_port}/video.mjpg?res=640x480&fps=30"
+            print(f"📹 Connecting to video stream: {video_url}")
+            cap = cv2.VideoCapture(video_url)
+            # Set timeout to prevent hanging
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get latest frame
+            if not cap.isOpened():
+                print(f"❌ Failed to open video stream")
+                return
+            
+            print("✅ Video stream connected, starting detection loop...")
+            frame_count = 0
             while True:
                 ok, frame = cap.read()
                 if not ok:
-                    await asyncio.sleep(0.05)
+                    print(f"⚠️ Failed to read frame, retrying...")
+                    await asyncio.sleep(0.1)
+                    # Try to reopen if connection lost
+                    cap.release()
+                    cap = cv2.VideoCapture(video_url)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     continue
+                
+                frame_count += 1
+                if frame_count % 30 == 0:  # Log every 30 frames (~1 second at 30fps)
+                    print(f"📊 Processing frame #{frame_count}")
+                
                 det = self.detect(frame)
                 await self.act(det, frame.shape)
                 await asyncio.sleep(0.02)  # ~50 Hz loop
@@ -114,18 +132,21 @@ class AutoController:
             error_x = det["cx"] - 0.5
             error_y = det["cy"] - 0.5
             # Aim servos based on error
-            pan_delta = int(self.cfg.aim_kp * error_x * 1000)
-            tilt_delta = int(self.cfg.aim_kp * error_y * 1000)
+            # FIXED: Servos are reversed, so reverse deltas
+            pan_delta = int(-self.cfg.aim_kp * error_x * 1000)  # Reversed
+            tilt_delta = int(-self.cfg.aim_kp * error_y * 1000)  # Reversed
             await self.send({"type": "servo_delta", "pan_delta": pan_delta, "tilt_delta": tilt_delta})
 
             # Movement: drive forward if centered enough
+            # FIXED: Motors are wired backwards, so swap left/right
             center_err = math.hypot(error_x, error_y)
             forward = max(0.0, 1.0 - center_err * 3.0) * self.cfg.move_k
             left = right = forward
             # small steering
             left -= error_x * 0.6
             right += error_x * 0.6
-            await self.send({"type": "drive", "left": left, "right": right})
+            # Swap left/right for backwards motor wiring
+            await self.send({"type": "drive", "left": right, "right": left})
 
             # Pump heuristic
             pump_on = det["area"] >= self.cfg.pump_area_thr

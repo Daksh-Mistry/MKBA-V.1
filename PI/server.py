@@ -142,7 +142,10 @@ class RobotServer:
                 message = data.get("message", "")
                 print(f"💬 Chat: {message}")
                 # Echo back for now (AI integration will be added later)
-                await websocket.send(json.dumps({"type": "chat_response", "message": f"Received: {message}"}))
+                try:
+                    await websocket.send(json.dumps({"type": "chat_response", "message": f"Echo: {message}"}))
+                except Exception as e:
+                    print(f"⚠️ Failed to send chat response: {e}")
         except json.JSONDecodeError as e:
             print(f"⚠️ Invalid JSON received: {message[:50]}...")
         except Exception as e:

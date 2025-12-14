@@ -173,8 +173,8 @@ function send(obj) {
 const keys = new Set();
 // Only capture keys when not typing in input fields
 document.addEventListener("keydown", (e) => {
-  // Ignore if typing in input field
-  if (e.target.tagName === "INPUT" && e.target.id !== "chat-text") return;
+  // Ignore ALL input fields (including chat) - disable controls when typing
+  if (e.target.tagName === "INPUT") return;
   keys.add(e.code);
   handleKeys();
   // Prevent default for game controls
@@ -183,7 +183,8 @@ document.addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("keyup", (e) => {
-  if (e.target.tagName === "INPUT" && e.target.id !== "chat-text") return;
+  // Ignore ALL input fields (including chat)
+  if (e.target.tagName === "INPUT") return;
   keys.delete(e.code);
   handleKeys();
 });
@@ -210,11 +211,12 @@ function handleKeys() {
 
   let left = 0;
   let right = 0;
-  // movement - Fixed: W=forward, S=backward, A=left, D=right
-  if (keys.has("KeyW")) { left += 1; right += 1; }
-  if (keys.has("KeyS")) { left -= 1; right -= 1; }
-  if (keys.has("KeyA")) { left -= 0.5; right += 0.5; }  // Left turn
-  if (keys.has("KeyD")) { left += 0.5; right -= 0.5; }  // Right turn
+  // movement - FIXED: Motors are wired backwards, so swap left/right
+  // W=forward, S=backward, A=left turn, D=right turn
+  if (keys.has("KeyW")) { right += 1; left += 1; }      // Forward (swapped)
+  if (keys.has("KeyS")) { right -= 1; left -= 1; }      // Backward (swapped)
+  if (keys.has("KeyA")) { right -= 0.5; left += 0.5; }  // Left turn (swapped)
+  if (keys.has("KeyD")) { right += 0.5; left -= 0.5; }  // Right turn (swapped)
   
   // speed modifiers
   let scalar = 1.0;
@@ -229,13 +231,15 @@ function handleKeys() {
   }
 
   // servos - continuous movement with deltas (throttled to reduce noise)
+  // FIXED: Servos are reversed, so reverse all deltas
+  // Left arrow = pan left, Right arrow = pan right, Up = tilt up, Down = tilt down
   const now = Date.now();
   let panDelta = 0;
   let tiltDelta = 0;
-  if (keys.has("ArrowLeft")) panDelta -= 50;  // Increased step size for faster movement
-  if (keys.has("ArrowRight")) panDelta += 50;
-  if (keys.has("ArrowUp")) tiltDelta -= 50;
-  if (keys.has("ArrowDown")) tiltDelta += 50;
+  if (keys.has("ArrowLeft")) panDelta += 50;   // Pan left (reversed: increase pan value)
+  if (keys.has("ArrowRight")) panDelta -= 50;  // Pan right (reversed: decrease pan value)
+  if (keys.has("ArrowUp")) tiltDelta += 80;    // Tilt up (reversed: increase tilt value) - increased to 80 for stronger movement
+  if (keys.has("ArrowDown")) tiltDelta -= 80;   // Tilt down (reversed: decrease tilt value) - increased to 80 for stronger movement
   if (panDelta || tiltDelta) {
     // Throttle servo commands to reduce noise but keep them continuous
     if (now - lastServoSend >= SERVO_THROTTLE_MS) {
