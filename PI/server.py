@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from contextlib import suppress
 from typing import Any, Dict
 
 import aiohttp
@@ -61,6 +60,7 @@ class RobotServer:
         self.clients = set()
         self.mode = "manual"
         self.speed_scalar = 1.0
+        self.speed_scalar = 1.0
         print("\n✅ All hardware initialized!\n")
 
     async def handle_ws(self, websocket, path):
@@ -100,6 +100,7 @@ class RobotServer:
         try:
             data = json.loads(message)
             kind = data.get("type")
+            
             # Reduced logging - only log non-frequent commands
             if kind not in ("drive", "servo_delta", "pump", "speed_scalar"):
                 print(f"📥 Received command: {kind}", data)
@@ -114,24 +115,30 @@ class RobotServer:
                 elif not hasattr(self, '_last_stop_log') or (time.time() - self._last_stop_log) > 2:
                     print(f"🛑 Stop command received")
                     self._last_stop_log = time.time()
+            
             elif kind == "servo":
                 pan = int(data.get("pan", self.servos.pan))
                 tilt = int(data.get("tilt", self.servos.tilt))
                 self.servos.set_pan_tilt(pan, tilt)
                 print(f"🎯 Servo: Pan={pan}µs, Tilt={tilt}µs")
+            
             elif kind == "pump":
                 on = bool(data.get("on", False))
                 self.relay.pump_on() if on else self.relay.pump_off()
                 print(f"💧 Pump: {'ON' if on else 'OFF'}")
+            
             elif kind == "mode":
                 self.mode = data.get("value", self.mode)
                 print(f"🔄 Mode changed to: {self.mode}")
+            
             elif kind == "speed_scalar":
                 self.speed_scalar = float(data.get("value", 1.0))
                 print(f"⚡ Speed scalar: {self.speed_scalar}")
+            
             elif kind == "emergency_stop":
                 self._safe_mode()
                 print("🛑 Emergency stop!")
+            
             elif kind == "servo_delta":
                 pan_delta = int(data.get("pan_delta", 0))
                 tilt_delta = int(data.get("tilt_delta", 0))
@@ -142,15 +149,8 @@ class RobotServer:
                 self._servo_log_count += 1
                 if self._servo_log_count % 20 == 0:  # Log every 20th command
                     print(f"🎯 Servo: Pan={self.servos.pan}µs, Tilt={self.servos.tilt}µs")
-            elif kind == "chat":
-                message = data.get("message", "")
-                print(f"💬 Chat: {message}")
-                # Echo back for now (AI integration will be added later)
-                try:
-                    await websocket.send(json.dumps({"type": "chat_response", "message": f"Echo: {message}"}))
-                except Exception as e:
-                    print(f"⚠️ Failed to send chat response: {e}")
-        except json.JSONDecodeError as e:
+
+        except json.JSONDecodeError:
             print(f"⚠️ Invalid JSON received: {message[:50]}...")
         except Exception as e:
             print(f"⚠️ Error handling message: {e}")
@@ -177,10 +177,12 @@ class RobotServer:
             }
             if self.clients:
                 data = json.dumps(payload)
-                results = await asyncio.gather(
+                # Note: list(self.clients) creates a snapshot to safely iterate during changes
+                await asyncio.gather(
                     *[self._safe_send(ws, data) for ws in list(self.clients)],
                     return_exceptions=True,
                 )
+                
                 # Log first few broadcasts for debugging
                 count += 1
                 if count <= 3:
@@ -193,7 +195,7 @@ class RobotServer:
         try:
             await websocket.send(data)
         except websockets.exceptions.ConnectionClosed:
-            # Connection closed, will be removed from clients set
+            # Connection closed, will be removed from clients set automatically
             pass
         except Exception as e:
             print(f"⚠️ Failed to send to client: {type(e).__name__}: {e}")
@@ -208,6 +210,10 @@ class RobotServer:
         self.camera.set_resolution(w, h, fps)
 
         boundary = "frame"
+        # Optimization: Pre-encode the boundary and headers to save CPU in the loop
+        boundary_bytes = b"--" + boundary.encode() + b"\r\n"
+        content_type_bytes = b"Content-Type: image/jpeg\r\n"
+        
         resp = web.StreamResponse(
             status=200,
             reason="OK",
@@ -218,8 +224,8 @@ class RobotServer:
             async for frame in self.camera.frames():
                 try:
                     await resp.write(
-                        b"--" + boundary.encode() + b"\r\n"
-                        + b"Content-Type: image/jpeg\r\n"
+                        boundary_bytes
+                        + content_type_bytes
                         + f"Content-Length: {len(frame)}\r\n\r\n".encode()
                         + frame
                         + b"\r\n"
@@ -289,4 +295,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-
