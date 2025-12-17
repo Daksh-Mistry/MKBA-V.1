@@ -1,13 +1,17 @@
 """
 Commander Mode: Laptop acts as the Central Brain (Server).
-SAFE MODE: Forces Video Timeout to 1 second to prevent 30s Freezes.
+MERGED FIX: Safe Mode Video + Full Command Dictionary (Drive, Look, Fire).
 """
 from __future__ import annotations
+
+import os
+# --- CRITICAL FIX: FORCE OPENCV TIMEOUT ---
+# Prevents the 30-second freeze if camera signal is lost.
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;1000"
 
 import asyncio
 import json
 import time
-import os
 import cv2
 import websockets
 import webbrowser
@@ -21,11 +25,6 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from gemini_detector import GeminiFireDetector
 from concurrent.futures import ThreadPoolExecutor
-
-# --- CRITICAL FIX: FORCE OPENCV TIMEOUT ---
-# This prevents the "Stream timeout triggered after 30000 ms" error
-# by forcing it to fail after 1000ms (1 second) so the connection stays alive.
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;1000"
 
 load_dotenv()
 
@@ -66,8 +65,29 @@ class GeminiBrain:
             self.model = None
 
         if self.model:
+            # --- THE FULL COMMAND DICTIONARY ---
+            # This teaches the AI how to Drive, Look, and Fire using your specific hardware.
+            system_instruction = (
+                "You are Robo 2.0 Commander. Control via laptop proxy.\n"
+                "CRITICAL MOTOR MAPPING (Your wiring is swapped):\n"
+                "- FORWARD:  Left 1.0,  Right -1.0\n"
+                "- BACKWARD: Left -1.0, Right 1.0\n"
+                "- LEFT:     Left -1.0, Right -1.0\n"
+                "- RIGHT:    Left 1.0,  Right 1.0\n\n"
+                "COMMANDS (Output as hidden JSON block):\n"
+                "1. DRIVE: {\"drive\": {\"left\": 1.0, \"right\": -1.0}, \"duration\": 2000}\n"
+                "2. LOOK:  {\"servo_delta\": {\"pan_delta\": 50, \"tilt_delta\": 0}}\n"
+                "   (Positive pan = Left, Negative pan = Right. Tilt up is negative.)\n"
+                "3. FIRE:  {\"pump\": {\"on\": true}, \"duration\": 3000}\n\n"
+                "Example response:\n"
+                "I am engaging the pump now.\n"
+                "```json\n"
+                "{\"pump\": {\"on\": true}, \"duration\": 2000}\n"
+                "```"
+            )
+            
             self.chat = self.model.start_chat(history=[
-                {"role": "user", "parts": "You are Robo 2.0 Commander. Control via laptop proxy."}
+                {"role": "user", "parts": system_instruction}
             ])
 
     async def ask(self, text: str, context: Dict[str, Any], image_bytes: bytes = None):
@@ -111,8 +131,9 @@ class CommanderController:
         self.override_until = 0
         self.override_cmd = None
         
-        # Helper for background video tasks
+        # Thread pool to prevent video freeze
         self.executor = ThreadPoolExecutor(max_workers=1)
+        self.video_active = True
 
     def _start_http_server(self):
         Handler = http.server.SimpleHTTPRequestHandler
@@ -184,12 +205,30 @@ class CommanderController:
                          _, buf = cv2.imencode('.jpg', cv2.resize(self.current_frame, (320, 240)))
                          img_bytes = buf.tobytes()
                     
+                    # AI DECISION
                     reply = await self.brain.ask(msg_text, {"mode": self.robot_mode}, img_bytes)
                     await self._send_to_browser({"type": "chat_response", "message": reply["text"]})
                     
-                    if reply["action"] and "drive" in reply["action"]:
-                        self.override_cmd = reply["action"]["drive"]
-                        self.override_until = time.time() + (reply["action"].get("duration", 2000)/1000)
+                    # EXECUTE AI COMMANDS
+                    if reply["action"]:
+                        self.override_cmd = reply["action"]
+                        # Handle drive command
+                        if "drive" in self.override_cmd:
+                            self.override_cmd = self.override_cmd["drive"] # flatten for simple handling
+                            self.override_until = time.time() + (reply["action"].get("duration", 2000)/1000)
+                        
+                        # Handle pump command immediately
+                        elif "pump" in self.override_cmd:
+                            if self.pi_ws:
+                                await self.pi_ws.send(json.dumps({"type": "pump", "on": self.override_cmd["pump"]["on"]}))
+                                # Auto-off after duration
+                                dur = self.override_cmd.get("duration", 2000) / 1000
+                                asyncio.create_task(self._auto_pump_off(dur))
+
+                        # Handle servo command immediately
+                        elif "servo_delta" in self.override_cmd:
+                            if self.pi_ws:
+                                await self.pi_ws.send(json.dumps({"type": "servo_delta", **self.override_cmd["servo_delta"]}))
 
                 elif mtype == "mode":
                     self.robot_mode = data.get("value", "manual")
@@ -199,12 +238,16 @@ class CommanderController:
                 elif mtype in ["drive", "pump", "servo_delta", "speed_scalar", "emergency_stop"]:
                     if self.robot_mode == "manual" or mtype == "emergency_stop":
                         if self.pi_ws: 
-                            try:
-                                await self.pi_ws.send(message)
+                            try: await self.pi_ws.send(message)
                             except: pass
 
         finally:
             self.browser_ws.remove(websocket)
+
+    async def _auto_pump_off(self, delay):
+        await asyncio.sleep(delay)
+        if self.pi_ws:
+            await self.pi_ws.send(json.dumps({"type": "pump", "on": False}))
 
     async def _send_to_browser(self, obj):
         if not self.browser_ws: return
@@ -223,16 +266,15 @@ class CommanderController:
         except: pass
 
     async def _video_loop(self):
-        # We also hardcode a small timeout in the loop logic
         video_url = f"http://{self.cfg.pi_host}:{self.cfg.pi_video_port}/video.mjpg?res=320x240"
-        
         loop = asyncio.get_event_loop()
-        
         print("📷 Video Loop Started (Safe Mode)")
 
         while self.pi_ws and not self.pi_ws.closed:
-            # Run the connection attempt in a thread so it doesn't freeze the main loop
-            # If this takes >1 second, the os.environ setting above kills it.
+            if not self.video_active:
+                await asyncio.sleep(2)
+                continue
+
             cap = await loop.run_in_executor(self.executor, lambda: cv2.VideoCapture(video_url))
             
             if not cap.isOpened():
@@ -242,13 +284,13 @@ class CommanderController:
 
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
-            # Read frames
             while self.pi_ws and not self.pi_ws.closed:
+                # Timed read to prevent freeze
                 ok, frame = await loop.run_in_executor(self.executor, cap.read)
                 
                 if not ok:
                     print("⚠️ Video lost. Restarting stream...")
-                    break # Break inner loop to reconnect
+                    break 
                 
                 self.current_frame = frame
                 det = self.detect(frame)
@@ -284,7 +326,8 @@ class CommanderController:
         if self.robot_mode == "manual": return
 
         if time.time() < self.override_until and self.override_cmd:
-            if self.pi_ws: await self.pi_ws.send(json.dumps({"type": "drive", **self.override_cmd}))
+            if isinstance(self.override_cmd, dict) and "left" in self.override_cmd:
+                if self.pi_ws: await self.pi_ws.send(json.dumps({"type": "drive", **self.override_cmd}))
             return
 
         if det:
@@ -295,6 +338,8 @@ class CommanderController:
                 if det["area"] > 0.35: speed = 0.0 
 
             turn = error_x * 0.8 
+            
+            # --- SWAPPED LOGIC FOR VISION ---
             left_cmd = speed + turn
             right_cmd = -speed + turn 
             left_cmd = max(-1.0, min(1.0, left_cmd))
