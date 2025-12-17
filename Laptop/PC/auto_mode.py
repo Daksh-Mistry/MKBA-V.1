@@ -1,6 +1,6 @@
 """
 Commander Mode: Laptop acts as the Central Brain (Server).
-Updated for late 2025 Models (Gemini 2.5 Flash).
+SAFE MODE: Forces Video Timeout to 1 second to prevent 30s Freezes.
 """
 from __future__ import annotations
 
@@ -20,6 +20,12 @@ from ultralytics import YOLO
 from dotenv import load_dotenv
 import google.generativeai as genai
 from gemini_detector import GeminiFireDetector
+from concurrent.futures import ThreadPoolExecutor
+
+# --- CRITICAL FIX: FORCE OPENCV TIMEOUT ---
+# This prevents the "Stream timeout triggered after 30000 ms" error
+# by forcing it to fail after 1000ms (1 second) so the connection stays alive.
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;1000"
 
 load_dotenv()
 
@@ -41,7 +47,7 @@ class Config:
     pump_area_thr: float = 0.12
     detector: str = "auto"
 
-# --- BRAIN CLASS (Updated for 2.5 Flash) ---
+# --- BRAIN CLASS ---
 class GeminiBrain:
     def __init__(self, api_key: str):
         if not api_key:
@@ -50,8 +56,6 @@ class GeminiBrain:
             return
             
         genai.configure(api_key=api_key)
-        
-        # We explicitly use "gemini-2.5-flash" because it exists in your list.
         target_model = "gemini-2.5-flash"
         
         print(f"🧠 Brain initializing with: {target_model}")
@@ -63,9 +67,7 @@ class GeminiBrain:
 
         if self.model:
             self.chat = self.model.start_chat(history=[
-                {"role": "user", "parts": "You are Robo 2.0 Commander. Control via laptop proxy. "
-                                        "Motor mapping: Forward is Left -1, Right 1. "
-                                        "Example override: {'drive': {'left': -1, 'right': 1}, 'duration': 2000}"}
+                {"role": "user", "parts": "You are Robo 2.0 Commander. Control via laptop proxy."}
             ])
 
     async def ask(self, text: str, context: Dict[str, Any], image_bytes: bytes = None):
@@ -75,11 +77,9 @@ class GeminiBrain:
         if image_bytes: prompt.append({"mime_type": "image/jpeg", "data": image_bytes})
         
         try:
-            # Send message
             response = await asyncio.to_thread(self.chat.send_message, prompt)
             text = response.text
             
-            # Parse Action
             action = None
             if "```json" in text:
                 try:
@@ -95,15 +95,14 @@ class CommanderController:
         self.cfg = cfg
         self.brain = GeminiBrain(cfg.gemini_key)
         
-        # Detector Setup
         if cfg.detector == "yolo":
             print(f"🔹 Loading YOLO: {cfg.model_path}")
             self.model = YOLO(cfg.model_path)
             self.gemini = None
         else:
-            print("🔹 Initializing Gemini Vision")
+            print(f"🔹 Initializing Gemini Vision")
             self.model = None
-            self.gemini = GeminiFireDetector() # Uses 2.5 Flash now
+            self.gemini = GeminiFireDetector()
             
         self.pi_ws = None
         self.browser_ws = set()
@@ -111,9 +110,11 @@ class CommanderController:
         self.robot_mode = "manual"
         self.override_until = 0
         self.override_cmd = None
+        
+        # Helper for background video tasks
+        self.executor = ThreadPoolExecutor(max_workers=1)
 
     def _start_http_server(self):
-        """Serves the current folder to the web"""
         Handler = http.server.SimpleHTTPRequestHandler
         socketserver.TCPServer.allow_reuse_address = True
         try:
@@ -124,7 +125,6 @@ class CommanderController:
             print(f"⚠️ Port {self.cfg.http_port} busy. Web UI might already be running.")
 
     async def run(self):
-        # 1. FILE FINDER
         web_path = ""
         if os.path.exists("web/index.html"):
             web_path = "web/index.html"
@@ -132,23 +132,17 @@ class CommanderController:
         elif os.path.exists("index.html"):
             web_path = "index.html"
             print("📂 Found UI in: current folder")
-        else:
-            print("❌ ERROR: Could not find index.html! Browser will show 404.")
-            
-        # 2. Start HTTP Server
+        
         threading.Thread(target=self._start_http_server, daemon=True).start()
 
-        # 3. Open Browser
         if web_path:
             url = f"http://localhost:{self.cfg.http_port}/{web_path}?host=localhost"
             print(f"🚀 Launching Browser: {url}")
             webbrowser.open(url)
 
-        # 4. Start WebSocket Server
         server = await websockets.serve(self._handle_browser, "0.0.0.0", self.cfg.server_port)
         print(f"💻 Laptop Commander listening on port {self.cfg.server_port}")
 
-        # 5. Connect to Pi
         pi_uri = f"ws://{self.cfg.pi_host}:{self.cfg.pi_ws_port}"
         print(f"🔌 Connecting to Pi: {pi_uri}")
         
@@ -163,21 +157,23 @@ class CommanderController:
                         server.wait_closed()
                     )
             except (websockets.ConnectionClosed, ConnectionRefusedError, TimeoutError, OSError, asyncio.TimeoutError):
-                print(f"⚠️ Cannot connect to Pi. Retrying in 3s...")
+                print(f"⚠️ Connection Lost. Retrying in 3s...")
                 self.pi_ws = None
                 await asyncio.sleep(3)
             except Exception as e:
-                print(f"❌ Unexpected Error: {e}")
+                print(f"❌ Error: {e}")
                 await asyncio.sleep(3)
 
-    # --- BROWSER COMMUNICATION ---
     async def _handle_browser(self, websocket):
         self.browser_ws.add(websocket)
         print("📱 Browser Connected")
         try:
             await websocket.send(json.dumps({"type": "hello", "mode": self.robot_mode}))
             async for message in websocket:
-                data = json.loads(message)
+                try:
+                    data = json.loads(message)
+                except: continue
+                
                 mtype = data.get("type")
                 
                 if mtype == "chat":
@@ -188,7 +184,6 @@ class CommanderController:
                          _, buf = cv2.imencode('.jpg', cv2.resize(self.current_frame, (320, 240)))
                          img_bytes = buf.tobytes()
                     
-                    # ASK BRAIN
                     reply = await self.brain.ask(msg_text, {"mode": self.robot_mode}, img_bytes)
                     await self._send_to_browser({"type": "chat_response", "message": reply["text"]})
                     
@@ -203,7 +198,11 @@ class CommanderController:
 
                 elif mtype in ["drive", "pump", "servo_delta", "speed_scalar", "emergency_stop"]:
                     if self.robot_mode == "manual" or mtype == "emergency_stop":
-                        if self.pi_ws: await self.pi_ws.send(message)
+                        if self.pi_ws: 
+                            try:
+                                await self.pi_ws.send(message)
+                            except: pass
+
         finally:
             self.browser_ws.remove(websocket)
 
@@ -224,22 +223,40 @@ class CommanderController:
         except: pass
 
     async def _video_loop(self):
-        video_url = f"http://{self.cfg.pi_host}:{self.cfg.pi_video_port}/video.mjpg?res=640x480"
-        cap = cv2.VideoCapture(video_url)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # We also hardcode a small timeout in the loop logic
+        video_url = f"http://{self.cfg.pi_host}:{self.cfg.pi_video_port}/video.mjpg?res=320x240"
+        
+        loop = asyncio.get_event_loop()
+        
+        print("📷 Video Loop Started (Safe Mode)")
 
         while self.pi_ws and not self.pi_ws.closed:
-            _ = cap.grab()
-            ok, frame = cap.read()
-            if not ok:
-                await asyncio.sleep(0.1)
-                cap = cv2.VideoCapture(video_url)
-                continue
+            # Run the connection attempt in a thread so it doesn't freeze the main loop
+            # If this takes >1 second, the os.environ setting above kills it.
+            cap = await loop.run_in_executor(self.executor, lambda: cv2.VideoCapture(video_url))
             
-            self.current_frame = frame
-            det = self.detect(frame)
-            await self.act(det)
-            await asyncio.sleep(0.01)
+            if not cap.isOpened():
+                print("⚠️ Camera not ready. Retrying in 1s...")
+                await asyncio.sleep(1)
+                continue
+
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # Read frames
+            while self.pi_ws and not self.pi_ws.closed:
+                ok, frame = await loop.run_in_executor(self.executor, cap.read)
+                
+                if not ok:
+                    print("⚠️ Video lost. Restarting stream...")
+                    break # Break inner loop to reconnect
+                
+                self.current_frame = frame
+                det = self.detect(frame)
+                await self.act(det)
+                await asyncio.sleep(0.01)
+            
+            cap.release()
+            await asyncio.sleep(0.5)
 
     def detect(self, frame) -> Optional[dict]:
         if self.gemini:
@@ -284,12 +301,16 @@ class CommanderController:
             right_cmd = max(-1.0, min(1.0, right_cmd))
 
             if self.pi_ws: 
-                await self.pi_ws.send(json.dumps({"type": "drive", "left": left_cmd, "right": right_cmd}))
-                await self.pi_ws.send(json.dumps({"type": "pump", "on": det["area"] >= self.cfg.pump_area_thr}))
+                try:
+                    await self.pi_ws.send(json.dumps({"type": "drive", "left": left_cmd, "right": right_cmd}))
+                    await self.pi_ws.send(json.dumps({"type": "pump", "on": det["area"] >= self.cfg.pump_area_thr}))
+                except: pass
         else:
              if self.pi_ws:
-                await self.pi_ws.send(json.dumps({"type": "drive", "left": 0, "right": 0}))
-                await self.pi_ws.send(json.dumps({"type": "pump", "on": False}))
+                try:
+                    await self.pi_ws.send(json.dumps({"type": "drive", "left": 0, "right": 0}))
+                    await self.pi_ws.send(json.dumps({"type": "pump", "on": False}))
+                except: pass
 
 if __name__ == "__main__":
     try:

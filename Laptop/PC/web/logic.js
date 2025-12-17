@@ -1,3 +1,4 @@
+// FILE: logic.js
 const qs = new URLSearchParams(window.location.search);
 let host = qs.get("host") || localStorage.getItem("robo_host") || "robo.local";
 const wsPort = qs.get("wsPort") || "8765";
@@ -40,7 +41,7 @@ function connect() {
       connEl.textContent = `Connected (${host})`;
       connEl.style.color = "#4caf50";
       localStorage.setItem("robo_host", host);
-      setVideo("640x480"); // Load default video
+      setVideo("640x480"); 
     };
     
     ws.onclose = (e) => {
@@ -48,7 +49,7 @@ function connect() {
       ws = null;
       connEl.textContent = "Disconnected";
       connEl.style.color = "#f44336";
-      if(e.code !== 1000) reconnectTimer = setTimeout(() => { if (!ws) connect(); }, 3000);
+      if(e.code !== 1000) reconnectTimer = setTimeout(() => { if (!ws) connect(); }, 2000);
     };
     
     ws.onmessage = (ev) => {
@@ -73,28 +74,28 @@ function updateDashboard(data) {
     if(data.sensors?.ir_array) irEl.textContent = data.sensors.ir_array.join(",");
     if(data.servos) servosEl.textContent = `P:${data.servos.pan} T:${data.servos.tilt}`;
     
-    // Update Mode Button Visual
     if(modeToggleBtn) {
         modeToggleBtn.textContent = currentMode === "auto" ? "STOP AUTO" : "START AUTO";
         modeToggleBtn.style.background = currentMode === "auto" ? "#e91e63" : "#2b7cff";
     }
 }
 
-function setVideo(res = "640x480", fps = 30) {
+// VIDEO FIX: Hardcoded IP + Reduced FPS to 20
+function setVideo(res = "640x480", fps = 20) {
   if(!videoEl) return;
   
-  // Reset buttons
   toolbarButtons.forEach(btn => {
       btn.style.background = "#232a36";
       btn.style.fontWeight = "normal";
       btn.style.border = "1px solid #384455";
   });
 
+  // HARDCODED PI IP: Using the address from your screenshots
   const videoUrl = `http://192.168.29.59:${videoPort}/video.mjpg?res=${res}&fps=${fps}&_=${Date.now()}`;
+  
   videoEl.src = "";
-  setTimeout(() => videoEl.src = videoUrl, 50);
+  setTimeout(() => videoEl.src = videoUrl, 100);
 
-  // Smart Button Highlight
   videoEl.onload = () => {
       toolbarButtons.forEach(btn => {
           if(btn.dataset.res === res) {
@@ -134,31 +135,21 @@ function handleKeys() {
   let left = 0.0;
   let right = 0.0;
 
-  // --- SWAPPED STEERING LOGIC (W<->S, A<->D) ---
+  // --- SWAPPED LOGIC (MATCHING YOUR REQUEST) ---
   if (w && !s) {
-    // WAS Backward, NOW Forward (W Key)
-    // Sends the values previously assigned to 'S'
     left = 1.0; right = -1.0;
-    
-    // Turn overrides (Swapped A/D impact)
-    if (a) { left = -1.0; }  // A acts like D used to
-    if (d) { right = 1.0; }  // D acts like A used to
+    if (a) { left = -1.0; } 
+    if (d) { right = 1.0; } 
   } 
   else if (s && !w) {
-    // WAS Forward, NOW Backward (S Key)
-    // Sends the values previously assigned to 'W'
     left = -1.0; right = 1.0;
-    
-    // Turn overrides (Swapped A/D impact)
-    if (a) { left = 1.0; }   
+    if (a) { left = 1.0; } 
     if (d) { right = -1.0; } 
   }
   else if (a && !d) {
-    // Pivot "Left" (A Key) -> Now sends Pivot Right values
     left = -1.0; right = -1.0;
   }
   else if (d && !a) {
-    // Pivot "Right" (D Key) -> Now sends Pivot Left values
     left = 1.0; right = 1.0;
   }
 
@@ -168,7 +159,6 @@ function handleKeys() {
   
   send({ type: "drive", left: left * scalar, right: right * scalar });
 
-  // Servos
   let panDelta = 0;
   let tiltDelta = 0;
   if (keys.has("ArrowLeft")) panDelta += 50; 
@@ -185,7 +175,6 @@ function handleKeys() {
   if (keys.has("KeyM")) send({ type: "mode", value: currentMode === "manual" ? "auto" : "manual" });
 }
 
-// UI HANDLERS
 toolbarButtons.forEach(btn => btn.addEventListener("click", () => setVideo(btn.dataset.res)));
 if(modeToggleBtn) modeToggleBtn.addEventListener("click", () => send({ type: "mode", value: currentMode === "manual" ? "auto" : "manual" }));
 

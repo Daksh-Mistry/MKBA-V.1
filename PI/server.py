@@ -1,4 +1,7 @@
-"""Pi-side server: WebSocket control + MJPEG video + sensor broadcast."""
+"""
+Pi-side server: WebSocket control + Multicast MJPEG video + Sensor broadcast.
+Updated: Restored Resolution Toggle + Broadcast Stability.
+"""
 
 from __future__ import annotations
 
@@ -24,138 +27,129 @@ class RobotServer:
         print("🤖 Initializing Robo 2.0 Server...")
         pins = config.PINS
         
-        print("  ⚙️  Initializing motors...")
+        # --- HARDWARE INIT ---
+        print("   ⚙️  Initializing motors...")
         self.motors = MotorController(
             MotorPins(**pins["motor"]), default_speed=config.DEFAULT_SPEED
         )
-        print(f"     ✓ Motors ready (default speed: {config.DEFAULT_SPEED})")
+        print(f"    ✓ Motors ready (default speed: {config.DEFAULT_SPEED})")
         
-        print("  🎯 Initializing servos (PCA9685)...")
+        print("   🎯 Initializing servos (PCA9685)...")
         self.servos = PanTilt(ServoConfig(**pins["servo"]))
         if self.servos._pca:
-            print(f"     ✓ Servos initialized - Pan: {self.servos.pan}µs, Tilt: {self.servos.tilt}µs")
-            print(f"       Pan range: {pins['servo']['pan_min']}-{pins['servo']['pan_max']}µs")
-            print(f"       Tilt range: {pins['servo']['tilt_min']}-{pins['servo']['tilt_max']}µs")
+            print(f"    ✓ Servos initialized - Pan: {self.servos.pan}µs, Tilt: {self.servos.tilt}µs")
         else:
-            print("     ⚠ Servos not available (PCA9685 not found - running in simulation)")
+            print("    ⚠ Servos not available (PCA9685 not found - running in simulation)")
         
-        print("  🔥 Initializing sensors...")
-        # Filter out relay/led from sensor pins
+        print("   🔥 Initializing sensors...")
         sensor_pins = {k: v for k, v in pins["sensors"].items() if k not in ("relay", "led")}
         self.sensors = Sensors(SensorPins(**sensor_pins), enabled=config.ENABLE_SENSORS)
         if self.sensors.enabled:
-            print(f"     ✓ Sensors ready - {len(sensor_pins['flame_array'])} flame array, "
-                  f"{len(sensor_pins['flame_single'])} single flame, {len(sensor_pins['ir_array'])} IR")
-        else:
-            print("     ⚠ Sensors disabled or GPIO not available")
+            print(f"    ✓ Sensors ready")
         
-        print("  💧 Initializing relay & LED...")
+        print("   💧 Initializing relay & LED...")
         self.relay = RelayLED(pins["sensors"]["relay"], pins["sensors"]["led"])
-        print(f"     ✓ Relay on GPIO{pins['sensors']['relay']}, LED on GPIO{pins['sensors']['led']}")
+        print(f"    ✓ Relay/LED ready")
         
-        print("  📹 Initializing camera...")
+        print("   📹 Initializing camera...")
         self.camera = Camera()
-        print("     ✓ Camera ready (rpicam-vid)")
+        print("    ✓ Camera ready (rpicam-vid)")
+        
+        # --- MULTICAST VIDEO SETUP (The Stability Fix) ---
+        # This allows multiple clients (Auto Mode + Browser) to see video at once.
+        self._current_frame = None
+        self._camera_lock = asyncio.Condition()
+        self._current_res = (640, 480, 30) # Default Resolution
+        
+        # Start the background capture loop immediately
+        asyncio.create_task(self._capture_loop())
         
         self.clients = set()
         self.mode = "manual"
         self.speed_scalar = 1.0
-        self.speed_scalar = 1.0
         print("\n✅ All hardware initialized!\n")
 
+    async def _capture_loop(self):
+        """
+        Background task: Reads from camera hardware ONCE and notifies ALL clients.
+        This prevents the 'Device Busy' or 'Stream Timeout' crashes.
+        """
+        print("   📷 Camera Broadcast Loop Started")
+        while True:
+            try:
+                # We iterate over frames. If resolution changes, this loop might break/restart.
+                async for frame in self.camera.frames():
+                    async with self._camera_lock:
+                        self._current_frame = frame
+                        # Wake up everyone waiting for a frame
+                        self._camera_lock.notify_all() 
+            except Exception as e:
+                print(f"   ⚠️ Camera Loop Error (Restarting): {e}")
+                await asyncio.sleep(1) # Wait before retry
+
     async def handle_ws(self, websocket, path):
+        """Handles incoming WebSocket control connections."""
         client_addr = websocket.remote_address if hasattr(websocket, 'remote_address') else "unknown"
-        print(f"📱 New WebSocket connection attempt from {client_addr}")
+        print(f"📱 New Client Connected: {client_addr}")
         
         self.clients.add(websocket)
-        print(f"   ✓ Client added (total: {len(self.clients)})")
-        
         try:
-            # Send hello message immediately
-            hello_msg = json.dumps({"type": "hello", "mode": self.mode})
-            await websocket.send(hello_msg)
-            print(f"   ✓ Hello message sent to {client_addr}")
+            # Send initial hello
+            await websocket.send(json.dumps({"type": "hello", "mode": self.mode}))
             
-            # Keep connection alive and handle messages
+            # Listen for commands
             async for message in websocket:
                 await self._handle_message(websocket, message)
-                
-        except websockets.exceptions.ConnectionClosedOK:
-            print(f"   ✓ Client {client_addr} closed connection normally")
-        except websockets.exceptions.ConnectionClosedError as e:
-            print(f"   ⚠ Client {client_addr} closed unexpectedly: {e.code} - {e.reason}")
         except Exception as e:
-            print(f"   ⚠ WebSocket error for {client_addr}: {type(e).__name__}: {e}")
+            # print(f"   Note: Client disconnected ({e})")
+            pass
         finally:
             self.clients.discard(websocket)
-            print(f"📱 Client {client_addr} removed (remaining: {len(self.clients)})")
-            # Only enter safe mode if ALL clients disconnected
+            print(f"📱 Client Disconnected (Remaining: {len(self.clients)})")
             if len(self.clients) == 0:
-                print("⚠️ All clients disconnected - entering safe mode")
                 self._safe_mode()
-            else:
-                print(f"   ✓ {len(self.clients)} client(s) still connected - robot remains active")
 
     async def _handle_message(self, websocket, message: str):
         try:
             data = json.loads(message)
             kind = data.get("type")
             
-            # Reduced logging - only log non-frequent commands
+            # Filter logs to avoid spamming the console
             if kind not in ("drive", "servo_delta", "pump", "speed_scalar"):
-                print(f"📥 Received command: {kind}", data)
-            
+                print(f"📥 Received: {kind}", data)
+
             if kind == "drive":
                 left = float(data.get("left", 0))
                 right = float(data.get("right", 0))
                 self._drive(left, right)
-                # Always log drive commands for debugging
-                if abs(left) > 0.01 or abs(right) > 0.01:
-                    print(f"🚗 Drive command: left={left:.2f}, right={right:.2f}")
-                elif not hasattr(self, '_last_stop_log') or (time.time() - self._last_stop_log) > 2:
-                    print(f"🛑 Stop command received")
-                    self._last_stop_log = time.time()
-            
+                
             elif kind == "servo":
-                pan = int(data.get("pan", self.servos.pan))
-                tilt = int(data.get("tilt", self.servos.tilt))
-                self.servos.set_pan_tilt(pan, tilt)
-                print(f"🎯 Servo: Pan={pan}µs, Tilt={tilt}µs")
-            
+                self.servos.set_pan_tilt(data.get("pan"), data.get("tilt"))
+                
             elif kind == "pump":
                 on = bool(data.get("on", False))
-                self.relay.pump_on() if on else self.relay.pump_off()
-                print(f"💧 Pump: {'ON' if on else 'OFF'}")
-            
+                if on: self.relay.pump_on()
+                else: self.relay.pump_off()
+                
             elif kind == "mode":
                 self.mode = data.get("value", self.mode)
-                print(f"🔄 Mode changed to: {self.mode}")
-            
+                print(f"🔄 Mode Switched: {self.mode}")
+                
             elif kind == "speed_scalar":
                 self.speed_scalar = float(data.get("value", 1.0))
-                print(f"⚡ Speed scalar: {self.speed_scalar}")
-            
+                
             elif kind == "emergency_stop":
                 self._safe_mode()
-                print("🛑 Emergency stop!")
-            
+                print("🛑 Emergency STOP triggered")
+                
             elif kind == "servo_delta":
-                pan_delta = int(data.get("pan_delta", 0))
-                tilt_delta = int(data.get("tilt_delta", 0))
-                self.servos.nudge(pan_delta, tilt_delta)
-                # Reduced logging noise - only log occasionally
-                if not hasattr(self, '_servo_log_count'):
-                    self._servo_log_count = 0
-                self._servo_log_count += 1
-                if self._servo_log_count % 20 == 0:  # Log every 20th command
-                    print(f"🎯 Servo: Pan={self.servos.pan}µs, Tilt={self.servos.tilt}µs")
+                self.servos.nudge(data.get("pan_delta", 0), data.get("tilt_delta", 0))
 
-        except json.JSONDecodeError:
-            print(f"⚠️ Invalid JSON received: {message[:50]}...")
         except Exception as e:
-            print(f"⚠️ Error handling message: {e}")
+            print(f"⚠️ Message Error: {e}")
 
     def _drive(self, left: float, right: float):
+        # Apply speed scalar and send to motors
         scale = self.speed_scalar
         self.motors.drive(left * scale, right * scale)
 
@@ -164,10 +158,10 @@ class RobotServer:
         self.relay.pump_off()
 
     async def broadcast_sensors(self):
+        """Sends sensor data to all connected clients at 10Hz."""
         interval = 1 / config.SENSOR_HZ
-        count = 0
         while True:
-            payload: Dict[str, Any] = {
+            payload = {
                 "type": "status",
                 "mode": self.mode,
                 "speed_scalar": self.speed_scalar,
@@ -176,119 +170,96 @@ class RobotServer:
                 "sensors": self.sensors.read(),
             }
             if self.clients:
-                data = json.dumps(payload)
-                # Note: list(self.clients) creates a snapshot to safely iterate during changes
-                await asyncio.gather(
-                    *[self._safe_send(ws, data) for ws in list(self.clients)],
-                    return_exceptions=True,
-                )
-                
-                # Log first few broadcasts for debugging
-                count += 1
-                if count <= 3:
-                    print(f"📊 Broadcast #{count} sent to {len(self.clients)} client(s)")
-                elif count == 4:
-                    print("📊 Status broadcasts continuing (logging reduced)...")
+                # Safely iterate over a copy of clients
+                target_clients = list(self.clients)
+                if target_clients:
+                    await asyncio.gather(
+                        *[ws.send(json.dumps(payload)) for ws in target_clients], 
+                        return_exceptions=True
+                    )
             await asyncio.sleep(interval)
 
-    async def _safe_send(self, websocket, data: str):
-        try:
-            await websocket.send(data)
-        except websockets.exceptions.ConnectionClosed:
-            # Connection closed, will be removed from clients set automatically
-            pass
-        except Exception as e:
-            print(f"⚠️ Failed to send to client: {type(e).__name__}: {e}")
-
     async def video_feed(self, request: web.Request):
+        """
+        Serves the latest frame from the SHARED buffer.
+        RESTORED: Resolution switching logic.
+        """
+        # 1. Parse Resolution from URL (e.g., ?res=1280x720&fps=30)
         resolution = request.query.get("res", "640x480")
         try:
             w, h = map(int, resolution.lower().split("x"))
         except ValueError:
             w, h = 640, 480
         fps = int(request.query.get("fps", "30"))
-        self.camera.set_resolution(w, h, fps)
 
+        # 2. Check if we need to update the Global Camera
+        # Note: Changing resolution affects ALL viewers (Broadcast behavior)
+        if (w, h, fps) != self._current_res:
+            print(f"📷 Switching Resolution to: {w}x{h} @ {fps}fps")
+            self._current_res = (w, h, fps)
+            try:
+                # This usually restarts the rpicam-vid process automatically
+                self.camera.set_resolution(w, h, fps)
+            except Exception as e:
+                print(f"⚠️ Failed to switch resolution: {e}")
+
+        # 3. Setup Stream Response
         boundary = "frame"
-        
-        # --- THE FIX: ADDING CORS HEADERS ---
-        resp = web.StreamResponse(
-            status=200,
-            reason="OK",
-            headers={
-                "Content-Type": f"multipart/x-mixed-replace; boundary={boundary}",
-                "Access-Control-Allow-Origin": "*",  # <--- THIS ALLOWS THE LAPTOP TO SEE VIDEO
-            },
-        )
-        # ------------------------------------
+        headers = {
+            "Content-Type": f"multipart/x-mixed-replace; boundary={boundary}",
+            "Access-Control-Allow-Origin": "*", # Fixes 'Connection Refused'
+        }
+        resp = web.StreamResponse(status=200, reason="OK", headers=headers)
+        await resp.prepare(request)
 
         try:
-            await resp.prepare(request)
-            async for frame in self.camera.frames():
-                try:
+            while True:
+                # Wait for the next frame from the BACKGROUND loop
+                async with self._camera_lock:
+                    await self._camera_lock.wait()
+                    frame = self._current_frame
+
+                if frame:
                     await resp.write(
                         b"--" + boundary.encode() + b"\r\n"
-                        + b"Content-Type: image/jpeg\r\n"
+                        b"Content-Type: image/jpeg\r\n"
                         + f"Content-Length: {len(frame)}\r\n\r\n".encode()
-                        + frame
-                        + b"\r\n"
+                        + frame + b"\r\n"
                     )
-                except (ConnectionResetError, ConnectionAbortedError, OSError):
-                    break
-        except Exception:
+        except (ConnectionResetError, ConnectionAbortedError, OSError):
+            # Client disconnected, just stop sending to them
             pass
         return resp
 
 
-async def start_video_app(robot: RobotServer):
+async def main():
+    robot = RobotServer()
+    
     app = web.Application()
     app.router.add_get("/video.mjpg", robot.video_feed)
     
-    # Add a simple test endpoint
+    # Simple test endpoint
     async def test_handler(request):
         return web.Response(text="Pi server is running!")
     app.router.add_get("/test", test_handler)
     
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, config.HOST, config.VIDEO_PORT)
+    
+    # Listen on ALL interfaces (0.0.0.0) so Laptop can connect
+    site = web.TCPSite(runner, "0.0.0.0", config.VIDEO_PORT)
     await site.start()
-    print(f"   ✓ Video server listening on port {config.VIDEO_PORT}")
-
-
-async def main():
-    robot = RobotServer()
     
-    print(f"🌐 Starting servers...")
-    print(f"   WebSocket: ws://{config.HOST}:{config.WS_PORT}")
-    print(f"   Video: http://{config.HOST}:{config.VIDEO_PORT}/video.mjpg")
+    print(f"🌐 Server Active | Video Broadcast: http://{config.HOST}:{config.VIDEO_PORT}/video.mjpg")
     
-    # Start WebSocket server
-    try:
-        ws_server = await websockets.serve(
-            robot.handle_ws, 
-            config.HOST, 
-            config.WS_PORT,
-            ping_interval=20,
-            ping_timeout=10
-        )
-        print(f"   ✓ WebSocket server listening on port {config.WS_PORT}")
-    except Exception as e:
-        print(f"   ✗ WebSocket server failed to start: {e}")
-        return
-    
-    print(f"   Waiting for client connections...\n")
-    
-    try:
-        await asyncio.gather(
-            robot.broadcast_sensors(),
-            start_video_app(robot),
-        )
-    except KeyboardInterrupt:
-        print("\n🛑 Shutting down...")
-    finally:
-        ws_server.close()
-        await ws_server.wait_closed()
+    async with websockets.serve(
+        robot.handle_ws, 
+        "0.0.0.0", 
+        config.WS_PORT,
+        ping_interval=20,
+        ping_timeout=10
+    ):
+        await robot.broadcast_sensors()
 
 
 if __name__ == "__main__":
