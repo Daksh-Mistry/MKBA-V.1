@@ -90,7 +90,7 @@ function setVideo(res = "640x480", fps = 30) {
       btn.style.border = "1px solid #384455";
   });
 
-  const videoUrl = `http://${host}:${videoPort}/video.mjpg?res=${res}&fps=${fps}&_=${Date.now()}`;
+  const videoUrl = `http://192.168.29.59:${videoPort}/video.mjpg?res=${res}&fps=${fps}&_=${Date.now()}`;
   videoEl.src = "";
   setTimeout(() => videoEl.src = videoUrl, 50);
 
@@ -134,28 +134,32 @@ function handleKeys() {
   let left = 0.0;
   let right = 0.0;
 
-  // --- FIXED STEERING LOGIC ---
+  // --- SWAPPED STEERING LOGIC (W<->S, A<->D) ---
   if (w && !s) {
-    // Forward Base: Left -1, Right 1
-    left = -1.0; right = 1.0;
-    // Turn overrides
-    if (a) { left = 1.0; }   // Turn Left -> Left motor reverses
-    if (d) { right = -1.0; } // Turn Right -> Right motor reverses
+    // WAS Backward, NOW Forward (W Key)
+    // Sends the values previously assigned to 'S'
+    left = 1.0; right = -1.0;
+    
+    // Turn overrides (Swapped A/D impact)
+    if (a) { left = -1.0; }  // A acts like D used to
+    if (d) { right = 1.0; }  // D acts like A used to
   } 
   else if (s && !w) {
-    // Backward Base: Left 1, Right -1
-    left = 1.0; right = -1.0;
-    // Turn overrides
-    if (a) { left = -1.0; } 
-    if (d) { right = 1.0; }
+    // WAS Forward, NOW Backward (S Key)
+    // Sends the values previously assigned to 'W'
+    left = -1.0; right = 1.0;
+    
+    // Turn overrides (Swapped A/D impact)
+    if (a) { left = 1.0; }   
+    if (d) { right = -1.0; } 
   }
   else if (a && !d) {
-    // Pivot Left
-    left = 1.0; right = 1.0;
+    // Pivot "Left" (A Key) -> Now sends Pivot Right values
+    left = -1.0; right = -1.0;
   }
   else if (d && !a) {
-    // Pivot Right
-    left = -1.0; right = -1.0;
+    // Pivot "Right" (D Key) -> Now sends Pivot Left values
+    left = 1.0; right = 1.0;
   }
 
   let scalar = 1.0;

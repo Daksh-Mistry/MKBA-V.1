@@ -278,8 +278,8 @@ class CommanderController:
                 if det["area"] > 0.35: speed = 0.0 
 
             turn = error_x * 0.8 
-            left_cmd = -speed - turn
-            right_cmd = speed - turn 
+            left_cmd = speed + turn
+            right_cmd = -speed + turn 
             left_cmd = max(-1.0, min(1.0, left_cmd))
             right_cmd = max(-1.0, min(1.0, right_cmd))
 
