@@ -210,31 +210,32 @@ class RobotServer:
         self.camera.set_resolution(w, h, fps)
 
         boundary = "frame"
-        # Optimization: Pre-encode the boundary and headers to save CPU in the loop
-        boundary_bytes = b"--" + boundary.encode() + b"\r\n"
-        content_type_bytes = b"Content-Type: image/jpeg\r\n"
         
+        # --- THE FIX: ADDING CORS HEADERS ---
         resp = web.StreamResponse(
             status=200,
             reason="OK",
-            headers={"Content-Type": f"multipart/x-mixed-replace; boundary={boundary}"},
+            headers={
+                "Content-Type": f"multipart/x-mixed-replace; boundary={boundary}",
+                "Access-Control-Allow-Origin": "*",  # <--- THIS ALLOWS THE LAPTOP TO SEE VIDEO
+            },
         )
+        # ------------------------------------
+
         try:
             await resp.prepare(request)
             async for frame in self.camera.frames():
                 try:
                     await resp.write(
-                        boundary_bytes
-                        + content_type_bytes
+                        b"--" + boundary.encode() + b"\r\n"
+                        + b"Content-Type: image/jpeg\r\n"
                         + f"Content-Length: {len(frame)}\r\n\r\n".encode()
                         + frame
                         + b"\r\n"
                     )
                 except (ConnectionResetError, ConnectionAbortedError, OSError):
-                    # Client disconnected, normal behavior
                     break
-        except (ConnectionResetError, ConnectionAbortedError, OSError):
-            # Client disconnected before/during stream, normal behavior
+        except Exception:
             pass
         return resp
 
