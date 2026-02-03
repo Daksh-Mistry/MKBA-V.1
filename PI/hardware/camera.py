@@ -7,6 +7,13 @@ import subprocess
 from typing import AsyncGenerator, Optional
 
 
+
+# troubleshoot_Camera:
+# 1. "Camera not ready"? Run 'rpicam-hello' in terminal.
+#    - If it fails there, check ribbon cable (silver pins towards HDMI).
+# 2. Stream freezes? Check power. Low leverage causes USB/CSI dropouts.
+# 3. "No cameras available"? Enable Legacy Camera in raspi-config if using older OS, 
+#    OR ensure libcamera is enabled for Bookworm.
 class Camera:
     def __init__(self, width: int = 640, height: int = 480, fps: int = 30):
         self.width = width

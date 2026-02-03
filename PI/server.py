@@ -145,6 +145,17 @@ class RobotServer:
             elif kind == "servo_delta":
                 self.servos.nudge(data.get("pan_delta", 0), data.get("tilt_delta", 0))
 
+            elif kind == "system":
+                cmd = data.get("command")
+                if cmd == "reboot":
+                    print("🔄 Rebooting System...")
+                    import os
+                    os.system("sudo reboot")
+                elif cmd == "shutdown":
+                    print("🔻 Shutting Down System...")
+                    import os
+                    os.system("sudo shutdown now")
+
         except Exception as e:
             print(f"⚠️ Message Error: {e}")
 
@@ -154,8 +165,10 @@ class RobotServer:
         self.motors.drive(left * scale, right * scale)
 
     def _safe_mode(self):
+        print("   🛡️ Safe Mode Triggered: Motors Stop, Pump Off, Servos Center")
         self.motors.stop()
         self.relay.pump_off()
+        self.servos.center()
 
     async def broadcast_sensors(self):
         """Sends sensor data to all connected clients at 10Hz."""

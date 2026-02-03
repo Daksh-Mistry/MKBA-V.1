@@ -110,7 +110,7 @@ For detailed setup instructions, see [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTI
 
 ## 📚 Documentation
 
-- [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTIONS.md) - Complete setup and troubleshooting guide
+- [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTIONS.md) - **Start Here!** Beginner-friendly setup guide.
 - [ARCHITECTURE_CLARIFICATION.md](ARCHITECTURE_CLARIFICATION.md) - System architecture and design decisions
 - [PI/README.md](PI/README.md) - Pi server documentation
 - [Laptop/PC/README.md](Laptop/PC/README.md) - Client documentation

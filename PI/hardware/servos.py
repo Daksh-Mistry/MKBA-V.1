@@ -25,6 +25,13 @@ class ServoConfig:
     step_us: int = 30
 
 
+
+# troubleshoot_PCA9685:
+# 1. "Servos not available"? Run 'i2cdetect -y 1' on Pi. Look for 0x40.
+#    - If empty: Check VCC/GND/SDA/SCL wiring.
+#    - If "UU": Driver loaded.
+# 2. Servos jitter? Power supply is too weak. Use external 5V 3A+, not Pi 5V.
+# 3. No movement? Check servo plugs (Yellow/Orange=Signal, Red=V+, Brown=GND).
 class PanTilt:
     def __init__(self, cfg: ServoConfig):
         self.cfg = cfg

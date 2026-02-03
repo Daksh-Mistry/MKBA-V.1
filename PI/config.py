@@ -43,4 +43,5 @@ SENSOR_HZ = 10  # 10 Hz sensor broadcast
 # Feature flags
 ENABLE_CAMERA = True
 ENABLE_SENSORS = True
+RELAY_ACTIVE_LOW = True  # Set to False if your relay triggers on HIGH
 

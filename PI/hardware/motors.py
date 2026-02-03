@@ -21,6 +21,11 @@ class MotorPins:
     in4: int
 
 
+
+# troubleshoot_L298N:
+# 1. No movement? Check ENA/ENB jumpers are present (if not using PWM pins).
+# 2. Humm but no turn? Check battery voltage (need > 7V for 12V motors).
+# 3. One side only? Swap IN1/IN2 with IN3/IN4 to rule out motor failure.
 class MotorController:
     def __init__(self, pins: MotorPins, default_speed: float = 0.5):
         self.pins = pins

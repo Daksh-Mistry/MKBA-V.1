@@ -46,6 +46,18 @@ class Config:
     pump_area_thr: float = 0.12
     detector: str = "auto"
 
+class PumpManager:
+    def __init__(self):
+        self.last_activation = 0
+        self.min_duration = 3.0 # Keep pump on for at least 3s
+
+    def should_be_on(self, fire_detected: bool) -> bool:
+        if fire_detected:
+            self.last_activation = time.time()
+            return True
+        # Hysteresis: Keep it on if time since last trigger < duration
+        return (time.time() - self.last_activation) < self.min_duration
+
 # --- BRAIN CLASS ---
 class GeminiBrain:
     def __init__(self, api_key: str):
@@ -101,12 +113,29 @@ class GeminiBrain:
             text = response.text
             
             action = None
-            if "```json" in text:
-                try:
-                    js = text.split("```json")[1].split("```")[0]
+            # Robust JSON extraction
+            try:
+                # 1. Try finding JSON within markdown blocks
+                if "```json" in text:
+                    js = text.split("```json")[1].split("```")[0].strip()
                     action = json.loads(js)
-                except: pass
-            return {"text": text.replace("```json", "").replace("```", "").strip(), "action": action}
+                # 2. Try finding JSON within generic code blocks
+                elif "```" in text:
+                    # Assumes the first code block contains the JSON
+                    js = text.split("```")[1].strip()
+                    action = json.loads(js)
+                # 3. Fallback: Try to find the first '{' and last '}'
+                else:
+                    start = text.find("{")
+                    end = text.rfind("}")
+                    if start != -1 and end != -1:
+                        js = text[start : end + 1]
+                        action = json.loads(js)
+            except Exception as e:
+                print(f"⚠️ JSON Parse Error: {e} | Text: {text[:50]}...")
+            
+            clean_text = text.replace("```json", "").replace("```", "").strip()
+            return {"text": clean_text, "action": action}
         except Exception as e: 
             return {"text": f"Error: {e}", "action": None}
 
@@ -131,9 +160,10 @@ class CommanderController:
         self.override_until = 0
         self.override_cmd = None
         
-        # Thread pool to prevent video freeze
-        self.executor = ThreadPoolExecutor(max_workers=1)
+        # Thread pool to prevent video freeze & AI blocking
+        self.executor = ThreadPoolExecutor(max_workers=3)
         self.video_active = True
+        self.pump_manager = PumpManager() # Fix 1: Hysteresis
 
     def _start_http_server(self):
         Handler = http.server.SimpleHTTPRequestHandler
@@ -157,7 +187,7 @@ class CommanderController:
         threading.Thread(target=self._start_http_server, daemon=True).start()
 
         if web_path:
-            url = f"http://localhost:{self.cfg.http_port}/{web_path}?host=localhost"
+            url = f"http://localhost:{self.cfg.http_port}/{web_path}?host={self.cfg.pi_host}"
             print(f"🚀 Launching Browser: {url}")
             webbrowser.open(url)
 
@@ -175,14 +205,23 @@ class CommanderController:
                     await asyncio.gather(
                         self._pi_listener(),
                         self._video_loop(),
+                        self._idle_checker(), # New: Auto-shutdown on tab close
                         server.wait_closed()
                     )
-            except (websockets.ConnectionClosed, ConnectionRefusedError, TimeoutError, OSError, asyncio.TimeoutError):
-                print(f"⚠️ Connection Lost. Retrying in 3s...")
+            except (websockets.ConnectionClosed, ConnectionRefusedError, TimeoutError, OSError, asyncio.TimeoutError) as e:
+                print(f"\n❌ CONNECTION FAILED: {e}")
+                print("   Troubleshooting Guide:")
+                print("   1. Is the Pi powered on? (Check LEDs)")
+                print("   2. Is the Pi connected to {pi_uri}?")
+                print(f"   3. Try pinging it: 'ping {self.cfg.pi_host}'")
+                print("   4. If Pi IP changed, update .env or use 'python auto_mode.py --host NEW_IP'")
+                print("   Retrying in 3s...\n")
                 self.pi_ws = None
                 await asyncio.sleep(3)
             except Exception as e:
-                print(f"❌ Error: {e}")
+                print(f"❌ CRITICAL ERROR: {e}")
+                import traceback
+                traceback.print_exc()
                 await asyncio.sleep(3)
 
     async def _handle_browser(self, websocket):
@@ -197,7 +236,11 @@ class CommanderController:
                 
                 mtype = data.get("type")
                 
-                if mtype == "chat":
+                if mtype == "heartbeat":
+                     self.last_heartbeat = time.time()
+                     continue
+
+                elif mtype == "chat":
                     msg_text = data.get("message", "")
                     print(f"💬 Browser: {msg_text}")
                     img_bytes = None
@@ -235,6 +278,12 @@ class CommanderController:
                     print(f"🔄 Mode: {self.robot_mode}")
                     await self._send_to_browser({"type": "status", "mode": self.robot_mode})
 
+                    # Fix 2: Auto-Center Servos when entering Auto Mode
+                    if self.robot_mode == "auto" and self.pi_ws:
+                        # Values based on PI/config.py (Pan: 1790, Tilt: 1850)
+                        await self.pi_ws.send(json.dumps({"type": "servo", "pan": 1790, "tilt": 1850}))
+                        print("   🎯 Servos Centered for Auto Mode")
+
                 elif mtype in ["drive", "pump", "servo_delta", "speed_scalar", "emergency_stop"]:
                     if self.robot_mode == "manual" or mtype == "emergency_stop":
                         if self.pi_ws: 
@@ -255,6 +304,21 @@ class CommanderController:
         for ws in self.browser_ws:
             try: await ws.send(msg)
             except: pass
+
+    async def _idle_checker(self):
+        """Shuts down server if no heartbeat for 10s."""
+        print("⏳ Idle Watchdog Active (Heartbeat Mode)")
+        self.last_heartbeat = time.time() # Start clock now
+        
+        while True:
+            await asyncio.sleep(2)
+            # If no heartbeat received in last 7 seconds...
+            if time.time() - self.last_heartbeat > 7:
+                 print(f"   ❤️‍🔥 No heartbeat for {int(time.time() - self.last_heartbeat)}s. Killing server.")
+                 os.kill(os.getpid(), 9)
+                 break
+            else:
+                 pass
 
     async def _pi_listener(self):
         try:
@@ -293,7 +357,11 @@ class CommanderController:
                     break 
                 
                 self.current_frame = frame
-                det = self.detect(frame)
+                
+                # OPTIMIZATION: Run AI in background thread to unblock Event Loop
+                # This keeps Manual Controls & WebSocket Pings alive while waiting for Google
+                det = await loop.run_in_executor(self.executor, self.detect, frame)
+                
                 await self.act(det)
                 await asyncio.sleep(0.01)
             
@@ -348,17 +416,35 @@ class CommanderController:
             if self.pi_ws: 
                 try:
                     await self.pi_ws.send(json.dumps({"type": "drive", "left": left_cmd, "right": right_cmd}))
-                    await self.pi_ws.send(json.dumps({"type": "pump", "on": det["area"] >= self.cfg.pump_area_thr}))
+                    
+                    # Fix 1: Use Hysteresis Logic
+                    should_pump = self.pump_manager.should_be_on(det["area"] >= self.cfg.pump_area_thr)
+                    await self.pi_ws.send(json.dumps({"type": "pump", "on": should_pump}))
+                    if should_pump: print(f"   🔥 PUMP ACTIVE (Area: {det['area']:.2f})")
                 except: pass
         else:
              if self.pi_ws:
                 try:
                     await self.pi_ws.send(json.dumps({"type": "drive", "left": 0, "right": 0}))
-                    await self.pi_ws.send(json.dumps({"type": "pump", "on": False}))
+                    
+                    # Fix 1: Even if no fire seen, keep pump running if within hysteresis time
+                    should_pump = self.pump_manager.should_be_on(False)
+                    await self.pi_ws.send(json.dumps({"type": "pump", "on": should_pump}))
                 except: pass
 
+    async def shutdown(self):
+        print("\n🔻 Shutting down Commander...")
+        self.video_active = False
+        if self.pi_ws: await self.pi_ws.close()
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        # Force kill opencv if hanging
+        cv2.destroyAllWindows()
+
 if __name__ == "__main__":
+    cmdr = CommanderController(Config())
     try:
-        asyncio.run(CommanderController(Config()).run())
+        asyncio.run(cmdr.run())
     except KeyboardInterrupt:
         pass
+    finally:
+        asyncio.run(cmdr.shutdown())

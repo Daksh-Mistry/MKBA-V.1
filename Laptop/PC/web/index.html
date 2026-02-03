@@ -7,6 +7,15 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <div id="loading-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:999;display:flex;justify-content:center;align-items:center;">
+        <div class="boot-text">
+            <div>> INITIALIZING KERNEL... OK</div>
+            <div>> LOADING NEURAL NET... OK</div>
+            <div style="color:var(--secondary)">> CONNECTING TO BRAIN...</div>
+            <div style="margin-top:10px;">_ <span class="boot-cursor"></span></div>
+             <button onclick="document.getElementById('loading-overlay').remove()" style="margin-top:20px;background:none;border:1px solid #333;color:#555;font-size:10px;cursor:pointer;">SKIP SEQUENCE >></button>
+        </div>
+    </div>
     <header>
       <div class="title">Robo 2.0 Control</div>
       <div class="status">
@@ -18,6 +27,9 @@
         <span id="conn">Disconnected</span>
         <span id="mode">Manual</span>
         <span id="speed">1.0x</span>
+        <button id="estop-btn" class="btn-danger">STOP 🛑</button>
+        <button id="reboot-btn" class="btn-sys">Reboot</button>
+        <button id="shutdown-btn" class="btn-sys">Off</button>
       </div>
     </header>
     <main>
@@ -25,6 +37,7 @@
         <div id="video-toolbar">
           <button data-res="640x480">640x480</button>
           <button data-res="1280x720">1280x720</button>
+          <button id="flip-btn">Flip Cam</button>
           <button id="mode-toggle">Toggle Mode</button>
         </div>
         <img id="video" alt="Video feed" />
