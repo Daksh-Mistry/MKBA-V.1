@@ -1,113 +1,151 @@
-"""MJPEG camera stream helper for Bookworm (rpicam-vid) with async-friendly reads."""
+"""Multiprocessing camera worker for Raspberry Pi 5 using rpicam-vid."""
 
 from __future__ import annotations
 
 import asyncio
+import multiprocessing as mp
 import subprocess
+import time
 from typing import AsyncGenerator, Optional
 
 
+def _camera_process_worker(queue: mp.Queue, width: int, height: int, fps: int, stop_event: mp.Event):
+    """
+    Dedicated worker process running on a separate CPU core.
+    Continuously captures JPEG frames via rpicam-vid and puts the newest frame into a Queue.
+    """
+    cmd = [
+        "rpicam-vid",
+        "--width", str(width),
+        "--height", str(height),
+        "--framerate", str(fps),
+        "--codec", "mjpeg",
+        "--timeout", "0",
+        "--output", "-",
+        "--nopreview",
+        "--flush",
+    ]
+    
+    boundary = b"\xff\xd8"
+    while not stop_event.is_set():
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+            buffer = b""
+            while not stop_event.is_set() and proc.poll() is None and proc.stdout:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                buffer += chunk
 
-# troubleshoot_Camera:
-# 1. "Camera not ready"? Run 'rpicam-hello' in terminal.
-#    - If it fails there, check ribbon cable (silver pins towards HDMI).
-# 2. Stream freezes? Check power. Low leverage causes USB/CSI dropouts.
-# 3. "No cameras available"? Enable Legacy Camera in raspi-config if using older OS, 
-#    OR ensure libcamera is enabled for Bookworm.
+                start = buffer.find(boundary)
+                if start == -1:
+                    buffer = buffer[-4:]
+                    continue
+                if start > 0:
+                    buffer = buffer[start:]
+
+                next_start = buffer.find(boundary, len(boundary))
+                if next_start == -1:
+                    if len(buffer) > 2_000_000:
+                        buffer = b""
+                    continue
+
+                frame = buffer[:next_start]
+                buffer = buffer[next_start:]
+                
+                if len(frame) > 100:
+                    # Keep queue size = 1 (always newest frame)
+                    while not queue.empty():
+                        try:
+                            queue.get_nowait()
+                        except Exception:
+                            break
+                    queue.put(frame)
+
+        except FileNotFoundError:
+            # If rpicam-vid is not installed/off-pi dev environment
+            time.sleep(0.5)
+        except Exception as e:
+            time.sleep(0.5)
+        finally:
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=1)
+                except Exception:
+                    pass
+
+
 class Camera:
+    """FastAPI-compatible Multiprocessing Camera Manager."""
     def __init__(self, width: int = 640, height: int = 480, fps: int = 30):
         self.width = width
         self.height = height
         self.fps = fps
-        self._process: Optional[subprocess.Popen] = None
-        self._buffer = b""
-        self._boundary = b"\xff\xd8"  # JPEG SOI marker
+        self._queue: Optional[mp.Queue] = None
+        self._stop_event: Optional[mp.Event] = None
+        self._process: Optional[mp.Process] = None
+        self._latest_frame: bytes = b""
 
-    def _ensure_process(self):
-        if self._process and self._process.poll() is None:
+    def start(self):
+        if self._process and self._process.is_alive():
             return
-        cmd = [
-            "rpicam-vid",
-            "--width",
-            str(self.width),
-            "--height",
-            str(self.height),
-            "--framerate",
-            str(self.fps),
-            "--codec",
-            "mjpeg",
-            "--timeout",
-            "0",  # Continuous
-            "--output",
-            "-",  # stdout
-            "--nopreview",
-            "--flush",
-        ]
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
+        self._queue = mp.Queue(maxsize=2)
+        self._stop_event = mp.Event()
+        self._process = mp.Process(
+            target=_camera_process_worker,
+            args=(self._queue, self.width, self.height, self.fps, self._stop_event),
+            daemon=True
         )
-        self._buffer = b""
+        self._process.start()
+        print(f"📷 Multiprocessing Camera Process Started (PID: {self._process.pid})")
 
-    def _read_frame_blocking(self) -> bytes:
-        """Blocking read of the next JPEG frame from rpicam-vid."""
-        self._ensure_process()
-        if not self._process or not self._process.stdout:
-            return b""
+    def stop(self):
+        if self._stop_event:
+            self._stop_event.set()
+        if self._process:
+            self._process.join(timeout=1)
+            if self._process.is_alive():
+                self._process.terminate()
+            self._process = None
+        print("📷 Camera Process Stopped")
 
-        while True:
-            chunk = self._process.stdout.read(4096)
-            if not chunk:
-                # Process ended; restart
-                self._process = None
-                self._ensure_process()
-                continue
-
-            self._buffer += chunk
-
-            # Find start of JPEG
-            start = self._buffer.find(self._boundary)
-            if start == -1:
-                # No start marker yet, keep reading
-                self._buffer = self._buffer[-4:]  # keep tail to find boundary
-                continue
-            if start > 0:
-                self._buffer = self._buffer[start:]
-
-            # Find next start marker to delimit the frame
-            next_start = self._buffer.find(self._boundary, len(self._boundary))
-            if next_start == -1:
-                # Need more data
-                if len(self._buffer) > 2_000_000:  # too big, reset
-                    self._buffer = b""
-                continue
-
-            frame = self._buffer[:next_start]
-            self._buffer = self._buffer[next_start:]
-            if len(frame) > 100:
-                return frame
+    def get_latest_frame(self) -> bytes:
+        if self._queue and not self._queue.empty():
+            try:
+                self._latest_frame = self._queue.get_nowait()
+            except Exception:
+                pass
+        return self._latest_frame
 
     async def frames(self) -> AsyncGenerator[bytes, None]:
-        """Async generator yielding JPEG frames without blocking the event loop."""
-        loop = asyncio.get_running_loop()
+        """Async frame generator for FastAPI MJPEG HTTP Streaming."""
+        interval = 1 / max(1, self.fps)
         while True:
-            try:
-                frame = await loop.run_in_executor(None, self._read_frame_blocking)
-                yield frame or b""
-            except FileNotFoundError:
-                # rpicam-vid missing; wait and yield empty frame
-                await asyncio.sleep(1 / max(1, self.fps))
-                yield b""
-            except Exception:
-                # On error, wait briefly
-                await asyncio.sleep(0.1)
+            frame = self.get_latest_frame()
+            if frame:
+                yield frame
+            await asyncio.sleep(interval)
 
-    def set_resolution(self, width: int, height: int, fps: int):
-        """Update resolution (restarts stream)."""
-        self.width, self.height, self.fps = width, height, fps
-        if self._process:
-            self._process.terminate()
-            self._process = None
+
+if __name__ == "__main__":
+    print("Testing Multiprocessing Camera Module...")
+    cam = Camera(width=640, height=480, fps=30)
+    cam.start()
+    
+    try:
+        print("  Waiting 3 seconds for frames...")
+        for i in range(6):
+            time.sleep(0.5)
+            frame = cam.get_latest_frame()
+            print(f"  [{i+1}/6] Frame size: {len(frame)} bytes")
+    finally:
+        cam.stop()
+        print("Camera test complete!")
 

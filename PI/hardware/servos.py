@@ -1,71 +1,90 @@
-"""PCA9685 servo control for pan/tilt."""
+"""PCA9685 servo control calibrated for MG996R high-torque servos."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from adafruit_pca9685 import PCA9685
-    import busio
-    import board
-except ImportError:
-    PCA9685 = None  # type: ignore
-    busio = None  # type: ignore
-    board = None  # type: ignore
+from adafruit_servokit import ServoKit
 
 
 @dataclass
 class ServoConfig:
-    pan_channel: int
-    tilt_channel: int
-    pan_min: int
-    pan_max: int
-    tilt_min: int
-    tilt_max: int
-    step_us: int = 30
+    pan_channel: int = 0
+    tilt_channel: int = 1
+    pan_min: int = 500
+    pan_max: int = 2500
+    tilt_min: int = 500
+    tilt_max: int = 2500
 
 
-
-# troubleshoot_PCA9685:
-# 1. "Servos not available"? Run 'i2cdetect -y 1' on Pi. Look for 0x40.
-#    - If empty: Check VCC/GND/SDA/SCL wiring.
-#    - If "UU": Driver loaded.
-# 2. Servos jitter? Power supply is too weak. Use external 5V 3A+, not Pi 5V.
-# 3. No movement? Check servo plugs (Yellow/Orange=Signal, Red=V+, Brown=GND).
 class PanTilt:
     def __init__(self, cfg: ServoConfig):
         self.cfg = cfg
-        self.pan = (cfg.pan_min + cfg.pan_max) // 2
-        self.tilt = (cfg.tilt_min + cfg.tilt_max) // 2
         self._pca = None
-        if PCA9685:
-            i2c = busio.I2C(board.SCL, board.SDA)
-            self._pca = PCA9685(i2c)
-            self._pca.frequency = 50
-            self._write(self.cfg.pan_channel, self.pan)
-            self._write(self.cfg.tilt_channel, self.tilt)
+        if ServoKit :
+            try:
+                self._pca = ServoKit(channels=16)
 
-    def _clamp(self, val: int, lo: int, hi: int) -> int:
-        return max(lo, min(hi, val))
+                self.pan = self._pca.servo[self.cfg.pan_channel]
+                self.pan.set_pulse_width_range(self.cfg.pan_min, self.cfg.pan_max)
+                self.pan.actuation_range = 180 
 
-    def _write(self, channel: int, pulse_us: int):
-        if not self._pca:
-            return
-        duty_cycle = int(pulse_us / 1000000 * 50 * 0xFFFF)
-        self._pca.channels[channel].duty_cycle = duty_cycle
+                self.tilt = self._pca.servo[self.cfg.tilt_channel]
+                self.tilt.set_pulse_width_range(self.cfg.tilt_min, self.cfg.tilt_max)
+                self.tilt.actuation_range = 180 
+                
+                self.pan.angle = 90
+                self.tilt.angle = 90
+            except Exception as e:
+                print(f"PCA9685 Servo Hardware Not Found: {e} (Running Servo Simulation)")
+                self._pca = None
 
-    def set_pan_tilt(self, pan_us: int, tilt_us: int):
-        self.pan = self._clamp(pan_us, self.cfg.pan_min, self.cfg.pan_max)
-        self.tilt = self._clamp(tilt_us, self.cfg.tilt_min, self.cfg.tilt_max)
-        self._write(self.cfg.pan_channel, self.pan)
-        self._write(self.cfg.tilt_channel, self.tilt)
 
-    def nudge(self, pan_delta_us: int, tilt_delta_us: int):
-        self.set_pan_tilt(self.pan + pan_delta_us, self.tilt + tilt_delta_us)
+
+
+    def set_pan_tilt(self, pan_us: int | None, tilt_us: int | None):
+        if pan_us is not None:
+            try :
+                self.pan.angle = max(0 ,min(self.pan.angle + pan_us, self.pan.actuation_range))
+            except :
+                print("Hardware error for pan :- ", pan_us)
+        if tilt_us is not None:
+            try :
+                self.tilt.angle = max(0 ,min(self.tilt.angle + tilt_us, self.tilt.actuation_range))
+            except :
+                print("Hardware error for tilt :-", tilt_us)
 
     def center(self):
-        self.set_pan_tilt(
-            (self.cfg.pan_min + self.cfg.pan_max) // 2,
-            (self.cfg.tilt_min + self.cfg.tilt_max) // 2,
-        )
+        self.pan.angle = self.pan.actuation_range // 2
+        self.tilt.angle = self.tilt.actuation_range // 2
+
+
+
+if __name__ == "__main__":
+    import time
+    import sys 
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    import config
+    print("Testing Servos Module (MG996R / PCA9685)...")
+    servos = PanTilt(ServoConfig(**config.PINS['servo']))
+    print(f"Current Pan: {servos.pan.angle} degree | Current Tilt: {servos.tilt.angle} degree")
+    
+    print("Sweeping Pan Left / Right...")
+    servos.set_pan_tilt(90, None)
+    time.sleep(1)
+    servos.set_pan_tilt(-180, None)
+    time.sleep(1)
+    servos.set_pan_tilt(90, None)
+    time.sleep(1)
+    
+    print("Sweeping Tilt Up / Down...")
+    servos.set_pan_tilt(None, 90)
+    time.sleep(1)
+    servos.set_pan_tilt(None, -180)
+    time.sleep(1)
+    servos.set_pan_tilt(None, 90)
+    time.sleep(1)
+
+    print("Servos test complete!")
 

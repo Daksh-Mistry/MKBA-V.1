@@ -1,0 +1,17 @@
+PI/
+├── config.py                 # Central pin mappings & runtime parameters
+├── server.py                 # Clean, lightweight FastAPI entry point (~90 lines)
+├── hardware/                 # Isolated Hardware Abstraction Modules
+│   ├── __init__.py           # Hardware package exports
+│   ├── motors.py             # 6-wheel tank steering driver
+│   ├── servos.py             # MG996R PCA9685 servo driver
+│   ├── sensors.py            # 4 IR edge + 4 Flame sensor reader
+│   ├── relay_led.py          # Relay pump & status LED control
+│   └── camera.py             # Multiprocessing camera worker process
+├── api/                      # Modular FastAPI APIRouters
+│   ├── __init__.py           # API package exports
+│   ├── video.py              # Low-latency MJPEG video streaming router (/video)
+│   └── websocket.py          # Bi-directional WS commands & 10Hz telemetry router (/ws)
+└── tests/                    # System Diagnostic Test Suite
+    ├── test_all.py           # Single-command diagnostic runner across all hardware
+    └── test_websocket.py     # WebSocket control simulator test

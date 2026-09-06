@@ -1,0 +1,17 @@
+[Unit]
+Description=Robo 2.0 FastAPI Server Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Robo2.0/PI
+ExecStart=/bin/bash /home/pi/Robo2.0/PI/start_robo.sh
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+# delete comment to automatically run everything at startup
+# WantedBy=multi-user.target
