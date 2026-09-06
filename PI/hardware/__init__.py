@@ -4,7 +4,6 @@ from .motors import MotorController, MotorPins
 from .servos import PanTilt, ServoConfig
 from .sensors import Sensors, SensorPins
 from .relay_led import RelayLED
-from .camera import Camera
 
 __all__ = [
     "MotorController",
@@ -14,5 +13,4 @@ __all__ = [
     "Sensors",
     "SensorPins",
     "RelayLED",
-    "Camera",
 ]

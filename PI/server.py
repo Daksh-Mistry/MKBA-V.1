@@ -12,8 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 import config
-from hardware import MotorController, MotorPins, PanTilt, ServoConfig, Sensors, SensorPins, RelayLED, Camera
-from api.video import video_router, set_camera
+from hardware import MotorController, MotorPins, PanTilt, ServoConfig, Sensors, SensorPins, RelayLED
 from api.websocket import websocket_router, set_robot_reference, broadcast_telemetry_loop
 
 
@@ -43,28 +42,21 @@ class RobotServerManager:
         led_pin = pins["sensors"].get("led")  # Optional — may not be wired yet
         self.relay = RelayLED(relay_pin, led_pin)
 
-        print("Camera (Multiprocessing)...")
-        self.camera = Camera()
-
         self.mode = "manual"
         self.speed_scalar = 1.0
         self._telemetry_task = None
 
     def start(self):
-        if config.ENABLE_CAMERA:
-            self.camera.start()
         # Inject references into API routers
-        set_camera(self.camera)
         set_robot_reference(self)
         # Start background 10Hz sensor telemetry loop
         self._telemetry_task = asyncio.create_task(broadcast_telemetry_loop())
-        print("✅ Hardware & Services Fully Initialized!\n")
+        print("Hardware & Services Fully Initialized!\n")
 
     def stop(self):
         print("\n🔻 Shutting down server and hardware...")
         if self._telemetry_task:
             self._telemetry_task.cancel()
-        self.camera.stop()
         self.safe_mode()
         self.motors.shutdown()
 
@@ -94,7 +86,7 @@ async def lifespan(app: FastAPI):
 # FastAPI App
 app = FastAPI(
     title="Robo 2.0 Pi 5 Server API",
-    description="Modular FastAPI server for 6-wheel robot control, multiprocessing camera streaming, and sensor telemetry.",
+    description="Modular FastAPI server for 6-wheel robot control and sensor telemetry. Camera WebRTC stream is managed by MediaMTX background service on port 8889.",
     version="2.0",
     lifespan=lifespan
 )
@@ -109,7 +101,8 @@ app.add_middleware(
 )
 
 # Register API Routers
-app.include_router(video_router)
+
+# ----------------------------- LOOK INSIDE WEBSOCKET FILE -------------------------------------------
 app.include_router(websocket_router)
 
 

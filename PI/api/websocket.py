@@ -112,7 +112,7 @@ async def broadcast_telemetry_loop():
                     "type": "status",
                     "mode": _robot_ref.mode,
                     "speed_scalar": _robot_ref.speed_scalar,
-                    "servos": {"pan": _robot_ref.servos.pan, "tilt": _robot_ref.servos.tilt},
+                    "servos": {"pan": _robot_ref.servos.pan.angle if _robot_ref.servos.pan.angle else None , "tilt": _robot_ref.servos.tilt.angle if _robot_ref.servos.tilt.angle else None},
                     "pump": _robot_ref.relay.state(),
                     "sensors": _robot_ref.sensors.read(),
                 }

@@ -1,28 +1,52 @@
 # Pi Server (Robo 2.0)
 
-## Features
-- WebSocket control server for motors/servos/pump/modes
-- MJPEG video endpoint `/video.mjpg?res=640x480&fps=30`
-- Periodic sensor/status broadcast (10 Hz default)
-- Safety: on disconnect or emergency -> motors stop, pump off
+## Overview
+Modular FastAPI server running on Raspberry Pi 5 to control a 6-wheel drive robot chassis, PCA9685 pan-tilt servos, water pump relay, flame & IR sensors, and MediaMTX WebRTC camera streaming.
 
-## Setup
+---
+
+## Architecture & Ports
+
+| Service | Protocol | Port | Description |
+| :--- | :--- | :--- | :--- |
+| **FastAPI Server** | HTTP REST | `8000` | Health check (`/`), status, and future REST API control endpoints |
+| **WebSocket API** | WS | `8000` | Bi-directional real-time control (`/ws`) & 5Hz sensor telemetry stream |
+| **MediaMTX Camera** | WebRTC | `8889` | Zero-latency WebRTC video stream (`http://<PI_IP>:8889/cam`) |
+
+---
+
+## Hardware Modules (`PI/hardware/`)
+- **`MotorController` (`motors.py`)**: 6-wheel tank steering drive control (Left & Right motor channels).
+- **`PanTilt` (`servos.py`)**: 2-axis camera servos (Pan/Tilt) driven via `adafruit_servokit.ServoKit(channels=16)` over PCA9685 I2C.
+- **`Sensors` (`sensors.py`)**: Reads 4 Flame digital sensors and 4 IR obstacle/edge sensors over BCM GPIO.
+- **`RelayLED` (`relay_led.py`)**: Controls high-power water pump relay (Active Low on GPIO 17) and optional status LED.
+
+---
+
+## How to Run
+
+### Option 1: Automated Script (Recommended)
+`start_robo.sh` handles auto-downloading MediaMTX, configuring ports/environment, launching MediaMTX in the background, and starting FastAPI:
+
 ```bash
 cd PI
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+./start_robo.sh
 ```
 
-Enable I2C and camera on Pi:
+*(Pressing `Ctrl+C` will gracefully shut down both FastAPI and MediaMTX background processes).*
+
+### Option 2: Systemd Boot Service
+To run automatically on Raspberry Pi boot:
+
 ```bash
-sudo raspi-config
+sudo cp PI/robo.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now robo.service
 ```
 
-Run server:
-```bash
-python server.py
-```
+---
 
-Discovery: Pi advertises as `robo.local` (configure mDNS on your network). Fallback: use Pi IP.
-
+## Discovery & Network
+- Pi advertises as `robo.local` via mDNS on your local network.
+- Fallback: Connect directly using the Pi's IP address (e.g., `192.168.x.x`).
+- Interactive OpenAPI / Swagger Docs: `http://<PI_IP>:8000/docs`

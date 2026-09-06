@@ -43,7 +43,6 @@ SLOW_FACTOR = 0.7
 SENSOR_HZ = 5  # 10 Hz telemetry & sensor broadcast
 
 # Feature flags
-ENABLE_CAMERA = True
 ENABLE_SENSORS = True
 RELAY_ACTIVE_LOW = True  # Set to False if your relay triggers on HIGH
 
