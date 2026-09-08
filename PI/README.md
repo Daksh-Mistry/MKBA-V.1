@@ -6,27 +6,38 @@ The computer backend sends JSON commands to this server. The Pi controls hardwar
 
 `.venv` holds the Python packages installed on the Pi; it is still needed. The optional `.env` only overrides defaults such as the port or speaker device.
 
+**Latest setup repair:** `setup_pi.sh` repairs the GPIO provider and configures I2C/SPI. The launcher now updates an old MediaMTX binary automatically after validating its replacement. API commands/version remain 2.3. For the currently available loose components, use [bench wiring and test order](../Documents/PI_BENCH_WIRING.md), including physical header-pin numbers.
+
 ## 1. Copy the update
 
 Stop the old launcher with Ctrl+C. From Windows PowerShell in `C:\Users\d\Desktop\Robo`:
 
 ```powershell
-scp .\pi-update-2.3.tar.gz raspberry@10.22.99.126:~/
+scp .\pi-update-2.3-setup.tar.gz raspberry@10.22.99.126:~/
 ```
 
 On the Pi:
 
 ```bash
 mkdir -p ~/Desktop/MKBA-V.1
-tar -xzf ~/pi-update-2.3.tar.gz -C ~/Desktop/MKBA-V.1
+tar -xzf ~/pi-update-2.3-setup.tar.gz -C ~/Desktop/MKBA-V.1
 cd ~/Desktop/MKBA-V.1/PI
 ```
 
-The archive contains `PI/` and `Documents/`, excluding private settings, environments and downloaded binaries. Your existing Pi `.venv` and camera binary remain in place. Old `PI_CONTROL_TOKEN`, `PI_FLAME_CHANNELS` and `PI_IR_CHANNELS` settings are ignored. Keep `PI_SIMULATION=0` if your old `.env` contains it.
+The archive contains `PI/` and `Documents/`, excluding private settings, environments, certificates/keys and downloaded binaries. Extraction preserves the Pi `.venv`; setup repairs its GPIO packages. The launcher backs up an old camera binary before replacing it with a verified download. Old `PI_CONTROL_TOKEN`, `PI_FLAME_CHANNELS` and `PI_IR_CHANNELS` settings are ignored. Keep `PI_SIMULATION=0` if your old `.env` contains it.
 
 For a new deployment, copy the whole current `PI/` folder. Git clones do not include uncommitted local changes. Do not copy Windows Python, the computer environment or `.verification` to the Pi.
 
 ## 2. Prepare Bookworm and Python
+
+**Simplest setup/repair:** stop the server first and run these as your normal Pi login user, from `PI/`:
+
+```bash
+bash setup_pi.sh
+sudo reboot
+```
+
+The script installs OS/Python prerequisites, removes conflicting old GPIO packages, reinstalls `rpi-lgpio`, enables I2C, disables SPI, and grants the current user GPIO/I2C access. It preserves `.env`, does not create tokens and does not start actuators. It uses sudo only for OS changes. Run it with the launcher and any directly started server stopped. A reboot applies interface/group changes. Camera and audio tools remain optional. Manual setup details follow for reference; completing the script does not require repeating them.
 
 Use **Raspberry Pi OS Bookworm 64-bit** on Pi 5. An existing installation does not need reflashing. Check:
 
@@ -158,7 +169,7 @@ sudo reboot
 
 Here `0` enables I2C and `1` disables SPI. After reboot, `i2cdetect -y 1` should find a connected default PCA9685 at `0x40`; GPIO 2/3 are SDA/SCL. Restart the launcher after setup changes. See [Raspberry Pi configuration](https://www.raspberrypi.com/documentation/computers/configuration.html) and [Adafruit Pi setup](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi).
 
-**Camera:** install `sudo apt install -y rpicam-apps-lite`, connect the supported camera and check `rpicam-hello --list-cameras`. Stop camera diagnostics before launching MediaMTX. The launcher downloads a version/checksum-checked binary to `PI/bin`. If it reports an older binary, stop the launcher, run `mv bin/mediamtx bin/mediamtx.previous`, then restart.
+**Camera:** install `sudo apt install -y rpicam-apps-lite`, connect the supported camera and check `rpicam-hello --list-cameras`. Stop camera diagnostics before launching MediaMTX. If its binary is missing, old or unusable, the launcher downloads the pinned version, checks checksum/version/configuration, preserves the previous binary as `bin/mediamtx-previous.*`, then installs the replacement. A failed download or validation leaves the old file intact and the API running. No manual file move is needed.
 
 | Consumer | Camera URL |
 |---|---|

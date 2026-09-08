@@ -55,22 +55,37 @@ API_PID=$!
 MEDIAMTX_VERSION="v1.21.0"
 MEDIAMTX_BIN="$SCRIPT_DIR/bin/mediamtx"
 prepare_camera() {
-if [[ ! -f "$MEDIAMTX_BIN" ]]; then
+local installed_version="" backup=""
+if [[ -x "$MEDIAMTX_BIN" ]]; then
+    installed_version="$("$MEDIAMTX_BIN" --version 2>/dev/null)" || installed_version=""
+fi
+if [[ "$installed_version" != "$MEDIAMTX_VERSION" ]]; then
+    echo "Preparing MediaMTX $MEDIAMTX_VERSION (current: ${installed_version:-missing or unusable})."
     DOWNLOAD_FILE="$(mktemp "$SCRIPT_DIR/bin/mediamtx-download.XXXXXX")" || return 1
     TEMP_BINARY="$(mktemp "$SCRIPT_DIR/bin/mediamtx-binary.XXXXXX")" || return 1
     curl --fail --location --connect-timeout 5 --max-time 30 --retry 1 --output "$DOWNLOAD_FILE" \
         "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz" || return 1
     # Official v1.21.0 Linux arm64 archive SHA256, pinned with the release.
-    echo "a8113b5928ba1a934b81557b61b8a07954b76921a4b567d54c7f086f8b39d9a2  $DOWNLOAD_FILE" | sha256sum --check --status || return 1
+    echo "a8113b5928ba1a934b81557b61b8a07954b76921a4b567d54c7f086f8b39d9a2  $DOWNLOAD_FILE" | sha256sum --check --status || {
+        echo "MediaMTX download checksum did not match; existing binary preserved."
+        return 1
+    }
     tar -xOf "$DOWNLOAD_FILE" mediamtx > "$TEMP_BINARY" || return 1
     chmod +x "$TEMP_BINARY" || return 1
+    [[ "$("$TEMP_BINARY" --version)" == "$MEDIAMTX_VERSION" ]] || {
+        echo "Downloaded MediaMTX cannot report the expected version; existing binary preserved."
+        return 1
+    }
+    "$TEMP_BINARY" --validate-conf "$SCRIPT_DIR/mediamtx.yml" || return 1
+    # Retain the old binary until the replacement is completely verified.
+    if [[ -f "$MEDIAMTX_BIN" ]]; then
+        backup="$(mktemp "$SCRIPT_DIR/bin/mediamtx-previous.XXXXXX")" || return 1
+        cp -p -- "$MEDIAMTX_BIN" "$backup" || return 1
+        echo "Previous MediaMTX saved as: $backup"
+    fi
     mv -- "$TEMP_BINARY" "$MEDIAMTX_BIN" || return 1
     TEMP_BINARY=""
 fi
-[[ "$("$MEDIAMTX_BIN" --version)" == "$MEDIAMTX_VERSION" ]] || {
-    echo "Expected MediaMTX $MEDIAMTX_VERSION. Move the old bin/mediamtx aside and run again."
-    return 1
-}
 "$MEDIAMTX_BIN" --validate-conf "$SCRIPT_DIR/mediamtx.yml" || return 1
 }
 

@@ -4,6 +4,8 @@ Date: 2026-09-09. This supersedes the earlier Pi-only and ML-only verification n
 
 > **Later Pi update:** [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md) records version 2.3, removal of Pi tokens, automatic sensor reads, 54 Pi tests and a fresh server run without `.env` or hardware. Backend (43), configuration (11) and full-stack integration (16 scenarios) also pass after Pi-token removal. The older counts below describe the earlier baseline; neither run establishes partial-hardware UI support or physical hardware acceptance.
 
+> **Setup repair follow-up:** the Pi suite now has **62 passing tests**, adding package-repair sequencing, verified MediaMTX replacement/preservation, and narrow cleanup-warning handling. The actual Pi's 15- and 30-second connection checks passed; GPIO setup remains pending repair. See [live observations](PI_LIVE_CHECK.md) and [bench wiring](PI_BENCH_WIRING.md).
+
 ## Result
 
 The backend, frontend, ML service, Pi integration, speech path and launch/configuration tooling are implemented. Automated checks pass using simulated hardware. The actual pretrained checkpoint has also processed a direct synthetic RTSP stream, and a real WebRTC receiver has decoded that stream.

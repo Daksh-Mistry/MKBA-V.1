@@ -4,13 +4,14 @@ import json
 import os
 import sys
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config
-from components import HardwareComponents, HardwareUnavailable, SensorBank
+from components import HardwareComponents, HardwareUnavailable, SensorBank, cleanup_gpio
 from simulation import SimMotors, SimServos, SimRelay
 from server import RobotServerManager, create_app
 from api import websocket as protocol
@@ -144,6 +145,20 @@ class PartialRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SensorTests(unittest.TestCase):
+    def test_empty_gpio_cleanup_warning_is_quiet_but_other_warnings_remain(self):
+        def cleanup(pins):
+            self.assertEqual(pins, [18, 22])
+            warnings.warn("No channels have been set up yet - nothing to clean up!", RuntimeWarning)
+            warnings.warn("Unexpected cleanup condition", RuntimeWarning)
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            cleanup_gpio(SimpleNamespace(cleanup=cleanup), [18, 22])
+        self.assertEqual([str(item.message) for item in recorded], ["Unexpected cleanup condition"])
+
+    def test_gpio_cleanup_exceptions_remain_visible(self):
+        with self.assertRaisesRegex(OSError, "cleanup failed"):
+            cleanup_gpio(SimpleNamespace(cleanup=Mock(side_effect=OSError("cleanup failed"))))
+
     def test_unconfigured_channels_never_import_or_read_a_driver(self):
         factory = Mock()
         bank = SensorBank(factory, (), ())

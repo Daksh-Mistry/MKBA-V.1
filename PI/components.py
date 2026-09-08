@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 
 import config
@@ -17,6 +18,17 @@ class HardwareUnavailable(ValueError):
 
 def describe_error(exc):
     return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def cleanup_gpio(gpio, pins=None):
+    # GPIO setup may have failed before claiming any pins. Only suppress that
+    # harmless cleanup warning; setup failures and cleanup exceptions stay visible.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="No channels have been set up yet.*", category=RuntimeWarning)
+        if pins is None:
+            gpio.cleanup()
+        else:
+            gpio.cleanup(pins)
 
 
 def real_motors():
@@ -42,7 +54,7 @@ def real_motors():
                 except Exception:
                     pass
         try:
-            GPIO.cleanup(list(pins.values()))
+            cleanup_gpio(GPIO, list(pins.values()))
         except Exception:
             pass
         raise
@@ -285,6 +297,6 @@ class HardwareComponents:
             gpio = sys.modules.get("RPi.GPIO")
             if gpio is not None:
                 try:
-                    gpio.cleanup()
+                    cleanup_gpio(gpio)
                 except Exception as exc:
                     self.cleanup_errors.append(f"GPIO: {describe_error(exc)}")

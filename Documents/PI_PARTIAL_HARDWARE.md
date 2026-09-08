@@ -2,6 +2,19 @@
 
 Updated 2026-09-09. This is the current Pi implementation and verification record. Setup and command examples are in [PI/README.md](../PI/README.md).
 
+> **Subsequent live deployment check:** [PI_LIVE_CHECK.md](PI_LIVE_CHECK.md) confirms the user's Pi now runs 2.3. Network/API/telemetry/watchdog checks passed; GPIO initialization still fails and needs package/setup repair. The local verification section below records the tests performed before that deployment.
+
+## Setup repair after the live Pi logs
+
+Package: `pi-update-2.3-setup.tar.gz`; API/message version remains 2.3. Wiring and the staged test sequence are in [PI_BENCH_WIRING.md](PI_BENCH_WIRING.md).
+
+- Added `PI/setup_pi.sh`: one-time Bookworm setup/repair using the current `.venv`, removal of the conflicting GPIO provider, reinstall of `rpi-lgpio`, I2C enabled, SPI disabled for the IR pins, and GPIO/I2C user groups. Requires the server stopped; does not create a token/config file, start actuators or reboot automatically. Uses sudo for OS changes. Exact package repair still needs execution on the Pi; SSH login was unavailable.
+- Updated `PI/start_robo.sh`: an old/missing/unusable MediaMTX binary is replaced only after archive checksum, executable version and configuration validation. The old binary is backed up before replacement; download/validation failure preserves it and leaves the API available.
+- Updated `PI/components.py`: suppress only the harmless GPIO cleanup warning about zero initialized channels. Actual setup failures, other warnings and cleanup exceptions remain visible. Hardware driver control implementations are unchanged.
+- **62 Pi tests passed** after these changes: 54 previous cases, 2 cleanup-warning/error cases, 2 camera replacement cases (including checksum/version/config failure subcases), and 4 setup-script cases. OS/package/network operations are replaced with test tools; tests do not install packages on the Pi. **20 Pi Python files** compile and parse with Python 3.11 grammar; both shell scripts pass Bash syntax checks.
+
+The camera download itself was not repeated against the Pi in these local tests. No new physical sensor/servo/motor/pump acceptance is claimed. Board and supply ratings are still needed before final actuator power wiring.
+
 ## What changed
 
 The normal server needs no Pi token or `.env` file. It initializes each component independently, reads all eight mapped sensor GPIO inputs automatically, and reports readings and failures through the usual API. There is no special bare-Pi mode. Explicit simulation remains for computer tests only; it is not selected automatically when hardware is missing.
@@ -66,7 +79,7 @@ Startup initialization failures require repair/setup and restart. Runtime sensor
 
 Reproduce Pi tests from `PI/`: `python -m unittest discover -s tests`. From the repository root, `python -m tests.integration_pi_bare` performs the Windows normal-server/no-hardware check; `python -m tests.integration_stack` starts the isolated computer stack. These developer tests require the documented test dependencies and are not Pi server startup requirements.
 
-These are software results, not measurements on the user's Pi. No new code has been deployed remotely in this update. I2C/GPIO behavior, sensor responses, physical motion, camera frames and audible playback still need checking on the Pi after deployment.
+The table above records local software tests. The user subsequently deployed 2.3 and its live server checks are recorded in [PI_LIVE_CHECK.md](PI_LIVE_CHECK.md). GPIO setup remains unresolved; sensor responses, physical motion, camera frames and audible playback remain unverified.
 
 The backend's transport now connects without a Pi token. Its existing state validation still conservatively rejects nullable servo/pump telemetry; partial-hardware UI/control handling is a later integration task. The Pi `/status` and diagnostic are the supported inspection paths at this stage. Complete-hardware and explicit-simulation status still pass full-stack regression checks.
 

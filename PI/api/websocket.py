@@ -35,7 +35,7 @@ FIELDS = {
 
 
 async def dispatch_ws_message(websocket, message):
-    """Validate the entire message before touching hardware; route is already authenticated."""
+    """Validate the entire message before touching hardware; one controller owns the route."""
     if _robot_ref is None:
         return
     request_id = None

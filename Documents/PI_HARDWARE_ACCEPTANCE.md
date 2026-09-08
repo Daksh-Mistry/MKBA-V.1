@@ -1,5 +1,7 @@
 # Pi hardware acceptance — first physical deployment
 
+For the current unassembled parts, begin with [bench wiring and staged tests](PI_BENCH_WIRING.md). It includes physical pin numbers and the GPIO setup repair. Final motor/relay/servo power connections require the actual board and supply ratings.
+
 Use this after [PI/README.md](../PI/README.md) setup. **Pi 2.3 starts normally with partial hardware, no Pi token/settings file, and all sensor inputs read automatically.** Use [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md) for the bare-Pi stage; perform the physical checks below only for installed components. Software tests do not verify wiring, motion, camera or sound. Start in manual mode with actuator power disconnected and complete one stage at a time.
 
 Record date, Pi OS/Python versions, robot wiring revision and observations here or in a dated copy. Do not record service tokens or API keys.
