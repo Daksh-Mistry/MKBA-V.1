@@ -32,7 +32,7 @@ load_dotenv()
 class Config:
     # Pi Settings
     pi_host: str = os.getenv("ROBO_HOST", "robo.local")
-    pi_ws_port: int = int(os.getenv("ROBO_WS_PORT", "8765"))
+    pi_ws_port: int = int(os.getenv("ROBO_WS_PORT", "8000"))
     pi_video_port: int = int(os.getenv("ROBO_VIDEO_PORT", "8080"))
     
     # Laptop Settings
@@ -88,7 +88,7 @@ class GeminiBrain:
                 "- RIGHT:    Left 1.0,  Right 1.0\n\n"
                 "COMMANDS (Output as hidden JSON block):\n"
                 "1. DRIVE: {\"drive\": {\"left\": 1.0, \"right\": -1.0}, \"duration\": 2000}\n"
-                "2. LOOK:  {\"servo_delta\": {\"pan_delta\": 50, \"tilt_delta\": 0}}\n"
+                "2. LOOK (relative degrees): {\"servo\": {\"pan\": 5, \"tilt\": 0}}\n"
                 "   (Positive pan = Left, Negative pan = Right. Tilt up is negative.)\n"
                 "3. FIRE:  {\"pump\": {\"on\": true}, \"duration\": 3000}\n\n"
                 "Example response:\n"
@@ -194,7 +194,7 @@ class CommanderController:
         server = await websockets.serve(self._handle_browser, "0.0.0.0", self.cfg.server_port)
         print(f"💻 Laptop Commander listening on port {self.cfg.server_port}")
 
-        pi_uri = f"ws://{self.cfg.pi_host}:{self.cfg.pi_ws_port}"
+        pi_uri = f"ws://{self.cfg.pi_host}:{self.cfg.pi_ws_port}/ws"
         print(f"🔌 Connecting to Pi: {pi_uri}")
         
         while True:
@@ -269,9 +269,9 @@ class CommanderController:
                                 asyncio.create_task(self._auto_pump_off(dur))
 
                         # Handle servo command immediately
-                        elif "servo_delta" in self.override_cmd:
+                        elif "servo" in self.override_cmd:
                             if self.pi_ws:
-                                await self.pi_ws.send(json.dumps({"type": "servo_delta", **self.override_cmd["servo_delta"]}))
+                                await self.pi_ws.send(json.dumps({"type": "servo", **self.override_cmd["servo"]}))
 
                 elif mtype == "mode":
                     self.robot_mode = data.get("value", "manual")
@@ -280,12 +280,17 @@ class CommanderController:
 
                     # Fix 2: Auto-Center Servos when entering Auto Mode
                     if self.robot_mode == "auto" and self.pi_ws:
-                        # Values based on PI/config.py (Pan: 1790, Tilt: 1850)
-                        await self.pi_ws.send(json.dumps({"type": "servo", "pan": 1790, "tilt": 1850}))
+                        # Stop and center before starting automatic control.
+                        await self.pi_ws.send(json.dumps({"type": "system", "command": "stop"}))
                         print("   🎯 Servos Centered for Auto Mode")
 
-                elif mtype in ["drive", "pump", "servo_delta", "speed_scalar", "emergency_stop"]:
-                    if self.robot_mode == "manual" or mtype == "emergency_stop":
+                elif mtype in ["drive", "pump", "servo", "system"]:
+                    if mtype == "system" and data.get("command") in ("stop", "shutdown"):
+                        self.robot_mode = "manual"
+                        self.override_until = 0
+                        self.override_cmd = None
+                        await self._send_to_browser({"type": "status", "mode": "manual"})
+                    if self.robot_mode == "manual" or mtype == "system":
                         if self.pi_ws: 
                             try: await self.pi_ws.send(message)
                             except: pass

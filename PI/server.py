@@ -43,7 +43,9 @@ class RobotServerManager:
         self.relay = RelayLED(relay_pin, led_pin)
 
         self.mode = "manual"
-        self.speed_scalar = 1.0
+        self.speed = config.DEFAULT_SPEED
+        self.shutting_down = False
+        self.shutdown_callback = None
         self._telemetry_task = None
 
     def start(self):
@@ -60,15 +62,24 @@ class RobotServerManager:
         self.safe_mode()
         self.motors.shutdown()
 
-    def drive(self, left: float, right: float):
-        scale = self.speed_scalar
-        self.motors.drive(left * scale, right * scale)
+    def drive(self, left: float, right: float, speed: float):
+        if not self.shutting_down:
+            self.motors.drive(left, right, speed)
+
+    def request_shutdown(self):
+        if self.shutdown_callback is None:
+            raise RuntimeError("Start with python server.py to enable script shutdown")
+        self.shutting_down = True
+        self.safe_mode()
+        self.shutdown_callback()
 
     def safe_mode(self):
         print("🛡️ Safe Mode: Motors Stopped, Pump OFF, Servos Centered")
-        self.motors.stop()
-        self.relay.pump_off()
-        self.servos.center()
+        for action in (self.motors.stop, self.relay.pump_off, self.servos.center):
+            try:
+                action()
+            except Exception as exc:
+                print(f"Safe mode action failed: {exc}")
 
 
 # Global Robot Server Instance
@@ -79,8 +90,10 @@ robot = RobotServerManager()
 async def lifespan(app: FastAPI):
     """Application startup and graceful shutdown lifecycle manager."""
     robot.start()
-    yield
-    robot.stop()
+    try:
+        yield
+    finally:
+        robot.stop()
 
 
 # FastAPI App
@@ -114,9 +127,11 @@ async def root():
         "system": "Robo 2.0",
         "hardware": "Raspberry Pi 5",
         "mode": robot.mode,
-        "speed_scalar": robot.speed_scalar,
+        "speed": robot.speed,
     }
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="info")
+    server = uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT, log_level="info"))
+    robot.shutdown_callback = lambda: setattr(server, "should_exit", True)
+    server.run()

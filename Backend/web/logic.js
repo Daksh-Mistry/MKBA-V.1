@@ -77,7 +77,7 @@ function connect() {
 function updateDashboard(data) {
   currentMode = data.mode || "manual";
   modeEl.textContent = currentMode.toUpperCase();
-  speedEl.textContent = (data.speed_scalar || 1.0).toFixed(2) + "x";
+  speedEl.textContent = ((data.speed ?? 0.5) * 100).toFixed(0) + "%";
   if (data.pump !== undefined) pumpEl.textContent = data.pump ? "ON" : "OFF";
   if (data.sensors?.flame_array) flameEl.textContent = data.sensors.flame_array.join(",");
   if (data.sensors?.ir_array) irEl.textContent = data.sensors.ir_array.join(",");
@@ -176,22 +176,22 @@ function handleKeys() {
   if (keys.has("ShiftLeft")) scalar = 1.3;
   if (keys.has("ControlLeft")) scalar = 0.6;
 
-  send({ type: "drive", left: left * scalar, right: right * scalar });
+  send({ type: "drive", left, right, speed: 0.5 * scalar });
 
   let panDelta = 0;
   let tiltDelta = 0;
-  if (keys.has("ArrowLeft")) panDelta += 50;
-  if (keys.has("ArrowRight")) panDelta -= 50;
-  if (keys.has("ArrowUp")) tiltDelta -= 50;
-  if (keys.has("ArrowDown")) tiltDelta += 50;
+  if (keys.has("ArrowLeft")) panDelta += 5;
+  if (keys.has("ArrowRight")) panDelta -= 5;
+  if (keys.has("ArrowUp")) tiltDelta -= 5;
+  if (keys.has("ArrowDown")) tiltDelta += 5;
 
   if (panDelta || tiltDelta) {
-    send({ type: "servo_delta", pan_delta: panDelta, tilt_delta: tiltDelta });
+    send({ type: "servo", pan: panDelta, tilt: tiltDelta });
   }
 
   // Pump logic moved to separate event listener for TOGGLE behavior
   // send({ type: "pump", on: keys.has("Space") });
-  if (keys.has("Escape")) send({ type: "emergency_stop" });
+  if (keys.has("Escape")) send({ type: "system", command: "stop" });
   if (keys.has("KeyM")) send({ type: "mode", value: currentMode === "manual" ? "auto" : "manual" });
 }
 
@@ -225,12 +225,9 @@ if (chatSend) {
 }
 
 // NEW CONTROLS
-document.getElementById("estop-btn").addEventListener("click", () => send({ type: "emergency_stop" }));
-document.getElementById("reboot-btn").addEventListener("click", () => {
-  if (confirm("Reboot Pi?")) send({ type: "system", command: "reboot" });
-});
+document.getElementById("estop-btn").addEventListener("click", () => send({ type: "system", command: "stop" }));
 document.getElementById("shutdown-btn").addEventListener("click", () => {
-  if (confirm("Shutdown Pi?")) send({ type: "system", command: "shutdown" });
+  if (confirm("Stop robot server and camera stream?")) send({ type: "system", command: "shutdown" });
 });
 
 // FLIP BUTTON LOGIC

@@ -1,6 +1,12 @@
 # Pi Server (Robo 2.0)
 
+> Start with [PI/README.md](../PI/README.md) for the current Bookworm installation guide, startup prerequisites and service setup. Its instructions supersede the abbreviated startup commands below.
+
 ## Overview
+
+Current command formats and shutdown behavior: [PI_PROTOCOL.md](PI_PROTOCOL.md). Review checklist: [PI_REVIEW_TRACKER.md](PI_REVIEW_TRACKER.md).
+
+Latest verification and startup blockers: [PI_VERIFICATION.md](PI_VERIFICATION.md).
 Modular FastAPI server running on Raspberry Pi 5 to control a 6-wheel drive robot chassis, PCA9685 pan-tilt servos, water pump relay, flame & IR sensors, and MediaMTX WebRTC camera streaming.
 
 ---

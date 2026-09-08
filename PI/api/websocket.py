@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import os
+import math
 from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -30,23 +30,28 @@ async def dispatch_ws_message(websocket: WebSocket, message: str):
         kind = data.get("type")
 
         # Verbose logging filter (suppress high-frequency drive pings)
-        if kind not in ("drive", "servo_delta", "pump", "speed_scalar", "heartbeat"):
+        if kind not in ("drive", "servo", "pump", "heartbeat"):
             print(f"📥 Received Command [{kind}]: {data}")
 
         if kind == "drive":
-            left = float(data.get("left", 0))
-            right = float(data.get("right", 0))
-            _robot_ref.drive(left, right)
+            left = direction(data.get("left", 0), "left")
+            right = direction(data.get("right", 0), "right")
+            speed = number(data.get("speed", config.DEFAULT_SPEED), "speed", 0, 1)
+            _robot_ref.drive(left, right, speed)
 
         elif kind == "servo":
-            _robot_ref.servos.set_pan_tilt(data.get("pan"), data.get("tilt"))
-
-        elif kind == "servo_delta":
-            _robot_ref.servos.nudge(data.get("pan_delta", 0), data.get("tilt_delta", 0))
+            pan = data.get("pan")
+            tilt = data.get("tilt")
+            if pan is not None:
+                pan = number(pan, "pan", -180, 180)
+            if tilt is not None:
+                tilt = number(tilt, "tilt", -180, 180)
+            if not _robot_ref.shutting_down:
+                _robot_ref.servos.set_pan_tilt(pan, tilt)
 
         elif kind == "pump":
             on = bool(data.get("on", False))
-            if on:
+            if on and not _robot_ref.shutting_down:
                 _robot_ref.relay.pump_on()
             else:
                 _robot_ref.relay.pump_off()
@@ -55,24 +60,38 @@ async def dispatch_ws_message(websocket: WebSocket, message: str):
             _robot_ref.mode = str(data.get("value", _robot_ref.mode))
             print(f"🔄 Mode Switched: {_robot_ref.mode}")
 
-        elif kind == "speed_scalar":
-            _robot_ref.speed_scalar = float(data.get("value", 1.0))
-
-        elif kind == "emergency_stop":
-            _robot_ref.safe_mode()
-            print("🛑 Emergency STOP Triggered via WebSocket!")
-
         elif kind == "system":
             cmd = data.get("command")
-            if cmd == "reboot":
-                print("🔄 Rebooting Raspberry Pi 5...")
-                os.system("sudo reboot")
+            if cmd == "stop":
+                _robot_ref.safe_mode()
             elif cmd == "shutdown":
-                print("🔻 Shutting Down Raspberry Pi 5...")
-                os.system("sudo shutdown now")
+                _robot_ref.request_shutdown()
+            else:
+                raise ValueError("system command must be stop or shutdown")
+        else:
+            raise ValueError(f"Unknown command type: {kind}")
 
     except Exception as e:
         print(f"⚠️ WS Message Dispatch Error: {e}")
+        await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+
+
+def direction(value, name):
+    """Reduce numeric direction to -1, 0 (stop), or 1; speed sets power."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return (value > 0) - (value < 0)
+
+
+def number(value, name, minimum, maximum):
+    """Validate command numbers before touching any hardware."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number")
+    if not math.isfinite(value) or not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
 
 
 @websocket_router.websocket("/ws")
@@ -111,8 +130,8 @@ async def broadcast_telemetry_loop():
                 payload = {
                     "type": "status",
                     "mode": _robot_ref.mode,
-                    "speed_scalar": _robot_ref.speed_scalar,
-                    "servos": {"pan": _robot_ref.servos.pan.angle if _robot_ref.servos.pan.angle else None , "tilt": _robot_ref.servos.tilt.angle if _robot_ref.servos.tilt.angle else None},
+                    "speed": _robot_ref.speed,
+                    "servos": {"pan": _robot_ref.servos.pan.angle, "tilt": _robot_ref.servos.tilt.angle},
                     "pump": _robot_ref.relay.state(),
                     "sensors": _robot_ref.sensors.read(),
                 }

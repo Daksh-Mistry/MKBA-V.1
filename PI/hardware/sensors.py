@@ -1,5 +1,5 @@
 """Discrete sensor reader for 4 Flame and 4 IR sensors on Raspberry Pi 5."""
-"""Useful read() --> { "flame_array": [0, 0, 0, 0], "ir_array": [0, 0, 0, 0] }"""
+# Useful read() --> { "flame_array": [0, 0, 0, 0], "ir_array": [0, 0, 0, 0] }
 
 from __future__ import annotations
 

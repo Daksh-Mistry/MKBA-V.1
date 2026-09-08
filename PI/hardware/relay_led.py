@@ -1,10 +1,10 @@
 """Pump relay and status LED control."""
-"""useful things :
-pump_on() to turn the pump on 
-pump_off() to turn the pump off 
-state() to get the state of the pump
-led(True) to turn the led on 
-led(False) to turn the led off """
+# Useful things:
+# pump_on() to turn the pump on
+# pump_off() to turn the pump off
+# state() to get the state of the pump
+# led(True) to turn the led on
+# led(False) to turn the led off
 
 from __future__ import annotations
 

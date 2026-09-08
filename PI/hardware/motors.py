@@ -1,5 +1,5 @@
 """Motor driver control supporting 6-wheel drive chassis and Raspberry Pi 5."""
-"""Use only 1/-1 for left/right and [0.0-1.0] for speed in drive(left,right,speed) method"""
+# Use only 1/-1 for left/right and [0.0-1.0] for speed in drive(left,right,speed) method
 
 from __future__ import annotations
 

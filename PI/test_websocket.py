@@ -5,7 +5,7 @@ import asyncio
 import websockets
 
 async def test_connection():
-    uri = "ws://localhost:8765"
+    uri = "ws://localhost:8000/ws"
     print(f"Testing WebSocket connection to {uri}...")
     
     try:

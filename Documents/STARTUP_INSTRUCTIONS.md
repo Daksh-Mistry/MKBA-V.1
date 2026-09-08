@@ -1,6 +1,6 @@
 # 🚀 Robo 2.0 - Beginner's Guide & Startup Instructions
 
-This guide walks you through starting and operating the Robo 2.0 Raspberry Pi 5 server.
+The maintained fresh-install guide is now [PI/README.md](../PI/README.md). Use it for Bookworm setup, current startup blockers, camera checks and systemd installation. The older quick-start below is retained for reference; `/docs` does not execute WebSocket commands, and Pi 5 Bookworm uses `rpicam-*` camera tools.
 
 ---
 

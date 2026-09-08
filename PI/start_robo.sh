@@ -48,13 +48,14 @@ fi
 
 # 5. Process Lifecycle Handler
 cleanup() {
+    status=$?
     echo ""
     echo "Shutting down MediaMTX background service..."
     if [ -n "$MEDIAMTX_PID" ]; then
         kill "$MEDIAMTX_PID" 2>/dev/null
     fi
     pkill -9 -f "$SCRIPT_DIR/bin/mediamtx" 2>/dev/null || true
-    exit 0
+    exit "$status"
 }
 
 # 6. Launch MediaMTX in Background
@@ -86,4 +87,4 @@ pip install -r requirements.txt > /dev/null 2>&1
 
 # Run FastAPI Server via Uvicorn on Port 8000
 echo "Launching FastAPI Server on http://0.0.0.0:8000..."
-python3 -m uvicorn server:app --host 0.0.0.0 --port 8000 --log-level info
+python3 server.py
