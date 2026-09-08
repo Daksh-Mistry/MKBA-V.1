@@ -1,0 +1,7 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+models/weights/
+models/*.local.json
+.pytest_cache/

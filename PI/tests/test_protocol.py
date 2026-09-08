@@ -15,7 +15,9 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.robot = SimpleNamespace(
             drive=Mock(), servos=Mock(), relay=Mock(), safe_mode=Mock(),
-            request_shutdown=Mock(), shutting_down=False, mode="manual",
+            request_shutdown=Mock(), touch_control=Mock(), pump=Mock(), shutting_down=False, mode="manual",
+            require_control_lease=Mock(), control_expired=False,
+            move_servos=Mock(),
         )
         protocol.set_robot_reference(self.robot)
         self.ws = SimpleNamespace(send_text=AsyncMock())
@@ -28,12 +30,12 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_relative_degrees(self):
         await self.send({"type": "servo", "pan": 5, "tilt": -10})
-        self.robot.servos.set_pan_tilt.assert_called_once_with(5, -10)
+        self.robot.move_servos.assert_called_once_with(5, -10)
         self.robot.servos.nudge.assert_not_called()
 
     async def test_invalid_axis_does_not_partially_move(self):
         await self.send({"type": "servo", "pan": 5, "tilt": 1850})
-        self.robot.servos.set_pan_tilt.assert_not_called()
+        self.robot.move_servos.assert_not_called()
         self.ws.send_text.assert_awaited_once()
 
     async def test_drive_includes_speed(self):
@@ -87,6 +89,29 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ws.send_text.await_count, 4)
         self.robot.safe_mode.assert_not_called()
         self.robot.request_shutdown.assert_not_called()
+
+    async def test_invalid_pump_mode_fields_and_nonobjects(self):
+        for value in ("false", "true", 0, 1, None):
+            await self.send({"type": "pump", "on": value})
+        for value in ("unknown", True, None, 1):
+            await self.send({"type": "mode", "value": value})
+        await self.send({"type": "drive", "unexpected": 1})
+        await self.send(["drive"])
+        self.robot.pump.assert_not_called()
+        self.robot.drive.assert_not_called()
+        self.robot.touch_control.assert_not_called()
+        self.assertEqual(self.robot.mode, "manual")
+        self.assertEqual(self.ws.send_text.await_count, 11)
+
+    async def test_heartbeat_renews_control_not_motion(self):
+        await self.send({"type": "heartbeat", "request_id": "hb-1"})
+        self.robot.touch_control.assert_called_once()
+        self.robot.drive.assert_not_called()
+        self.assertEqual(json.loads(self.ws.send_text.call_args.args[0]), {"type": "heartbeat_ack", "request_id": "hb-1"})
+
+    async def test_command_error_preserves_request_id(self):
+        await self.send({"type": "pump", "on": "false", "request_id": "bad-1"})
+        self.assertEqual(json.loads(self.ws.send_text.call_args.args[0])["request_id"], "bad-1")
 
 
 if __name__ == "__main__":

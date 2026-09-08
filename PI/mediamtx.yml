@@ -1,0 +1,34 @@
+# MediaMTX v1.21.0. Anyone on the reachable LAN can READ /cam.
+# Robot commands use the separate Python /ws endpoint; Pi 2.3 needs no token.
+logLevel: info
+api: false
+metrics: false
+pprof: false
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtmp: false
+hls: false
+srt: false
+moq: false
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+        path: cam
+paths:
+  cam:
+    source: rpiCamera
+    rpiCameraWidth: 1280
+    rpiCameraHeight: 720
+    rpiCameraFPS: 30
+    rpiCameraCodec: auto
+    rpiCameraH264Profile: baseline
+    rpiCameraIDRPeriod: 30

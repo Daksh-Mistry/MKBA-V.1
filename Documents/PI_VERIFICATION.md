@@ -1,5 +1,7 @@
 # Raspberry Pi verification — 2026-09-08
 
+> Historical record. See [SYSTEM_VERIFICATION.md](SYSTEM_VERIFICATION.md) for current full-stack results and [PI_HARDWARE_ACCEPTANCE.md](PI_HARDWARE_ACCEPTANCE.md) for physical checks. Findings below refer to the earlier checkout.
+
 ## Outcome
 
 The revised command handler passes its 10 regression tests. **The three hardware-file syntax errors are now fixed with the owner's permission:** only opening documentation strings were converted to comments. All 16 Python files compile. The real server and hardware package import successfully with fake GPIO/ServoKit, and safe mode and cleanup execute. Earlier real local WebSocket/Uvicorn shutdown checks with hardware doubles also passed. No physical hardware or live Pi was accessed; the remaining findings below are still open.

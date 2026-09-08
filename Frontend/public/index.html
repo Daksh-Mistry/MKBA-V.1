@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111716">
+  <title>Robo · Control room</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main id="login-screen" class="login-shell">
+    <form id="login-form" class="login-card">
+      <div class="brand-mark" aria-hidden="true">R</div>
+      <p class="eyebrow">YOUR ROBOT, CONNECTED</p>
+      <h1>Welcome to Robo.</h1>
+      <p class="muted">Open your control room to see, move and talk with your robot.</p>
+      <label for="access-token">Console access token</label>
+      <input id="access-token" name="token" type="password" autocomplete="current-password" required maxlength="256" placeholder="Enter your private access token">
+      <button id="login-button" class="primary" type="submit">Open control room <span aria-hidden="true">↗</span></button>
+      <p id="login-error" class="form-error" role="alert"></p>
+      <p class="micro">Use the console token from Frontend/.env. Your chat API key belongs in the ML service settings.</p>
+    </form>
+  </main>
+
+  <main id="console-screen" class="console" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark small" aria-hidden="true">R</span><div><strong>Robo</strong><span class="brand-sub">CONTROL ROOM</span></div></div>
+      <nav class="connection-strip" aria-label="Service connections">
+        <span id="backend-badge" class="badge" data-level="offline">Backend offline</span>
+        <span id="pi-badge" class="badge" data-level="offline">Pi offline</span>
+        <span id="ml-badge" class="badge" data-level="offline">ML offline</span>
+      </nav>
+      <button id="logout" class="quiet small-button">Sign out</button>
+    </header>
+
+    <div class="page-heading"><div><p class="eyebrow">LIVE WORKSPACE</p><h1>Eyes on. You're in control.</h1></div><button id="stop" class="stop-button" disabled><span aria-hidden="true">■</span> Stop robot <kbd>Esc</kbd></button></div>
+    <div id="control-banner" class="control-banner" role="status"><span id="control-summary">Connecting to backend…</span><span id="auto-phase" class="micro">Auto idle</span></div>
+
+    <div class="workspace-grid">
+      <section class="video-panel panel" aria-labelledby="camera-heading">
+        <div class="panel-heading"><div><p class="eyebrow">PI CAMERA</p><h2 id="camera-heading">A view from Robo</h2></div><span id="video-badge" class="badge" data-level="offline">Video offline</span></div>
+        <div id="video-stage" class="video-stage">
+          <video id="camera" autoplay muted playsinline aria-label="Live video from the robot"></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+          <div id="video-placeholder" class="video-placeholder"><span class="camera-symbol" aria-hidden="true">◎</span><strong>Ready when Robo is.</strong><p id="video-message">Connect the Pi camera to bring this view to life.</p></div>
+          <div class="video-hud"><span id="vision-summary">Detection idle</span><span id="overlay-age">Direct camera view</span></div>
+        </div>
+        <div class="video-toolbar"><button id="video-connect" class="secondary">Connect video</button><a id="raw-viewer" class="text-link" target="_blank" rel="noopener noreferrer" hidden>Open camera ↗</a><label class="checkbox"><input id="show-boxes" type="checkbox" checked> Detection boxes</label></div>
+        <div class="vision-controls"><label for="model-select">Vision model</label><select id="model-select"><option value="">Loading models…</option></select><button id="vision-start" class="secondary" disabled>Start detection</button><button id="vision-stop" class="quiet" disabled>Pause detection</button></div>
+        <p class="panel-note">Boxes use approximate timing and expire when stale. Video connects directly to the Pi.</p>
+      </section>
+
+      <section class="controls-panel panel" aria-labelledby="controls-heading">
+        <div class="panel-heading"><div><p class="eyebrow">MOVEMENT</p><h2 id="controls-heading">Take the wheel</h2></div><span id="ownership-label" class="tiny-tag">Viewing</span></div>
+        <div class="session-controls"><button id="claim" class="primary" disabled>Take control</button><button id="resume" class="secondary" disabled>Resume</button><button id="release" class="quiet" disabled>Release</button></div>
+        <div class="segmented" role="group" aria-label="Operating mode"><button id="manual-mode" aria-pressed="true" disabled>Manual</button><button id="auto-mode" aria-pressed="false" disabled>Auto</button></div>
+        <div class="control-columns"><div><h3>Drive <span class="muted">hold to move</span></h3><div class="direction-pad drive-pad" role="group" aria-label="Hold to drive"><button data-drive="forward" class="north" aria-label="Drive forward" disabled>↑</button><button data-drive="left" class="west" aria-label="Turn left" disabled>←</button><span class="pad-center" aria-hidden="true">WASD</span><button data-drive="right" class="east" aria-label="Turn right" disabled>→</button><button data-drive="backward" class="south" aria-label="Drive backward" disabled>↓</button></div></div>
+        <div><h3>Face <span class="muted">5° per tap</span></h3><div class="direction-pad face-pad" role="group" aria-label="Move robot face"><button data-servo="up" class="north" aria-label="Look up 5 degrees" disabled>↑</button><button data-servo="left" class="west" aria-label="Look left 5 degrees" disabled>←</button><span class="pad-center face-icon" aria-hidden="true">··</span><button data-servo="right" class="east" aria-label="Look right 5 degrees" disabled>→</button><button data-servo="down" class="south" aria-label="Look down 5 degrees" disabled>↓</button></div></div></div>
+        <div class="speed-row"><label for="speed">Drive speed <output id="speed-value" for="speed">20%</output></label><input id="speed" type="range" min="0.1" max="0.6" step="0.05" value="0.2"></div>
+        <div class="actuator-row"><span class="micro">FACE <strong id="servo-position">— / —</strong></span><span class="micro">PUMP <strong id="pump-state">Unknown</strong></span></div>
+        <div class="pump-row"><button id="pump-on" class="secondary" disabled>Pump burst</button><button id="pump-off" class="quiet" disabled>Turn pump off</button></div>
+        <p class="panel-note">Release a direction to stop. Stop robot also turns the pump off and centers the face.</p>
+      </section>
+
+      <section class="sensors-panel panel" aria-labelledby="sensors-heading">
+        <div class="panel-heading"><div><p class="eyebrow">SURROUNDINGS</p><h2 id="sensors-heading">What Robo senses</h2></div><span id="sensor-age" class="micro">No readings</span></div>
+        <div id="sensor-grid" class="sensor-grid"><p class="muted">Waiting for Pi sensor readings.</p></div>
+        <div class="sensor-legend micro"><span><i class="dot clear"></i> Clear</span><span><i class="dot blocked"></i> Detected</span><span><i class="dot unknown"></i> Unknown</span></div>
+      </section>
+
+      <section class="chat-panel panel" aria-labelledby="chat-heading">
+        <div class="panel-heading"><div><p class="eyebrow">A LITTLE PERSONALITY</p><h2 id="chat-heading">Talk to Robo</h2></div><button id="speech-stop" class="quiet small-button" disabled>Stop voice</button></div>
+        <div id="chat-history" class="chat-history" role="log" aria-live="polite" aria-relevant="additions text"><article class="chat-message robot"><span class="message-author">ROBO</span><p>I'm ready to chat. Try “look right” when you have control, or ask me about my surroundings.</p></article></div>
+        <form id="chat-form" class="chat-form"><label class="sr-only" for="chat-input">Message Robo</label><textarea id="chat-input" maxlength="2000" rows="2" placeholder="Say something to Robo…" disabled></textarea><button id="chat-send" class="primary" type="submit" disabled>Send <span aria-hidden="true">↗</span></button></form>
+        <div class="chat-options"><label class="checkbox"><input id="speak" type="checkbox"> Speak on Pi speaker</label><span id="chat-status" class="micro">Chat connects through your backend.</span></div>
+      </section>
+    </div>
+    <details class="diagnostics panel"><summary>Connection details & activity <span id="last-event" class="micro">Waiting for services</span></summary><div class="diagnostics-body"><div><h3>System</h3><pre id="system-details">No state received.</pre><button id="refresh" class="secondary small-button">Refresh connections</button><button id="shutdown" class="danger-text small-button" disabled>Shut down Pi script</button></div><div><h3>Recent activity</h3><ol id="activity-log" class="activity-log" aria-live="off"></ol></div></div></details>
+    <footer class="footer"><span>ROBO / LOCAL CONTROL</span><span id="footer-status">Awaiting connection</span></footer>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </main>
+</body>
+</html>

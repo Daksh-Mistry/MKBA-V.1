@@ -1,0 +1,17 @@
+{
+  "models": [
+    {
+      "id": "fire-smoke-v8n",
+      "revision": "13017fe8af477c25f5298d168e2dfede4b000753",
+      "adapter": "ultralytics",
+      "artifact": "weights/fire-smoke-v8n.pt",
+      "sha256": "b91633799ceb052c814b4f8b77a37efc9a40f002d528df97d74463585fa4f28f",
+      "class_map": {
+        "fire": "fire",
+        "smoke": "smoke"
+      },
+      "source": "https://huggingface.co/rabahdev/fire-smoke-yolov8n/blob/13017fe8af477c25f5298d168e2dfede4b000753/best.pt",
+      "license": "AGPL-3.0"
+    }
+  ]
+}

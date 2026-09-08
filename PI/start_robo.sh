@@ -1,90 +1,113 @@
 #!/usr/bin/env bash
-# Startup script for Robo 2.0 FastAPI server on Raspberry Pi 5
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Raspberry Pi OS Bookworm 64-bit. Own and clean up only this launcher's children.
+set -Eeuo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+API_PID=""
+MEDIAMTX_PID=""
+DOWNLOAD_FILE=""
+TEMP_BINARY=""
 
-# 1. Clean previous MediaMTX instances cleanly without killing this script
-echo "Cleaning working background processes under current dir..."
-pkill -9 -f "$SCRIPT_DIR/bin/mediamtx" 2>/dev/null || true
-
-# 2. Configure Environment & Architecture Auto-Detection
-mkdir -p "$SCRIPT_DIR/bin"
-MEDIAMTX_BIN="$SCRIPT_DIR/bin/mediamtx"
-
-ARCH=$(uname -m)
-case "$ARCH" in
-    x86_64)  MTX_ARCH="amd64" ;;
-    aarch64) MTX_ARCH="arm64" ;;
-    armv7l)  MTX_ARCH="armv7" ;;
-    *)       MTX_ARCH="amd64" ;;
-esac
-
-# 3. Auto-Download MediaMTX Binary if missing
-if [ ! -f "$MEDIAMTX_BIN" ]; then
-    echo "MediaMTX binary not found. Downloading for $ARCH ($MTX_ARCH)..."
-    MTX_VERSION="v1.20.1"
-    URL="https://github.com/bluenviron/mediamtx/releases/download/${MTX_VERSION}/mediamtx_${MTX_VERSION}_linux_${MTX_ARCH}.tar.gz"
-    
-    if wget -q "$URL" -O /tmp/mediamtx.tar.gz; then
-        tar -xzf /tmp/mediamtx.tar.gz -C "$SCRIPT_DIR/bin" mediamtx
-        rm /tmp/mediamtx.tar.gz
-        chmod +x "$MEDIAMTX_BIN"
-        echo "MediaMTX downloaded successfully."
-    else
-        echo "Warning: Could not download MediaMTX. Skipping streamer initialization."
-    fi
-fi
-
-# 4. Export MediaMTX Environment Variables
-export MTX_WEBRTCADDRESS=":8889"
-# Uses Pi Camera on ARM64; falls back safely on PC
-if [ "$ARCH" = "aarch64" ]; then
-    export MTX_PATHS_CAM_SOURCE="rpiCamera"
-    export MTX_PATHS_CAM_RPICAMERAWIDTH="1280"
-    export MTX_PATHS_CAM_RPICAMERAHEIGHT="720"
-    export MTX_PATHS_CAM_RPICAMERAFPS="60"
-fi
-
-# 5. Process Lifecycle Handler
 cleanup() {
-    status=$?
-    echo ""
-    echo "Shutting down MediaMTX background service..."
-    if [ -n "$MEDIAMTX_PID" ]; then
-        kill "$MEDIAMTX_PID" 2>/dev/null
-    fi
-    pkill -9 -f "$SCRIPT_DIR/bin/mediamtx" 2>/dev/null || true
+    local status=$?
+    trap - EXIT INT TERM
+    # Graceful API termination stops hardware and speech before streamer cleanup.
+    for child in "$API_PID" "$MEDIAMTX_PID"; do
+        if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
+            kill -TERM "$child" 2>/dev/null || true
+        fi
+    done
+    for child in "$API_PID" "$MEDIAMTX_PID"; do
+        [[ -n "$child" ]] || continue
+        for ((attempt=0; attempt<50; attempt++)); do
+            kill -0 "$child" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$child" 2>/dev/null; then
+            kill -KILL "$child" 2>/dev/null || true
+        fi
+        wait "$child" 2>/dev/null || true
+    done
+    [[ -z "$DOWNLOAD_FILE" ]] || rm -f -- "$DOWNLOAD_FILE"
+    [[ -z "$TEMP_BINARY" ]] || rm -f -- "$TEMP_BINARY"
     exit "$status"
 }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# 6. Launch MediaMTX in Background
-if [ -f "$MEDIAMTX_BIN" ]; then
-    echo "Starting MediaMTX WebRTC Streamer on port 8889..."
-    "$MEDIAMTX_BIN" > /dev/null 2>&1 &
-    MEDIAMTX_PID=$!
-    echo "MediaMTX started with PID $MEDIAMTX_PID"
+if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "aarch64" || "$(dpkg --print-architecture)" != "arm64" ]]; then
+    echo "This camera launcher requires Raspberry Pi OS 64-bit (arm64). For PC simulation use PI_SIMULATION=1 python server.py."
+    exit 1
 fi
 
-# Register trap listener AFTER launching MediaMTX
-trap cleanup EXIT SIGINT SIGTERM
+# Prevent duplicate launcher instances, without killing unrelated processes.
+mkdir -p bin
+exec 9>bin/robo-launch.lock
+flock -n 9 || { echo "Another robot launcher is running."; exit 1; }
+[[ -x .venv/bin/python ]] || { echo "Create .venv and install requirements first; see PI/README.md."; exit 1; }
+.venv/bin/python -c 'import config, fastapi, uvicorn, dotenv'
 
-# 7. Start FastAPI Server
-echo "Starting Robo 2.0 Server..."
+echo "Starting Pi API. Hardware availability is reported per component."
+.venv/bin/python server.py &
+API_PID=$!
 
-# Ensure Python Virtual Environment exists
-if [ ! -d ".venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv --system-site-packages .venv
+MEDIAMTX_VERSION="v1.21.0"
+MEDIAMTX_BIN="$SCRIPT_DIR/bin/mediamtx"
+prepare_camera() {
+if [[ ! -f "$MEDIAMTX_BIN" ]]; then
+    DOWNLOAD_FILE="$(mktemp "$SCRIPT_DIR/bin/mediamtx-download.XXXXXX")" || return 1
+    TEMP_BINARY="$(mktemp "$SCRIPT_DIR/bin/mediamtx-binary.XXXXXX")" || return 1
+    curl --fail --location --connect-timeout 5 --max-time 30 --retry 1 --output "$DOWNLOAD_FILE" \
+        "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz" || return 1
+    # Official v1.21.0 Linux arm64 archive SHA256, pinned with the release.
+    echo "a8113b5928ba1a934b81557b61b8a07954b76921a4b567d54c7f086f8b39d9a2  $DOWNLOAD_FILE" | sha256sum --check --status || return 1
+    tar -xOf "$DOWNLOAD_FILE" mediamtx > "$TEMP_BINARY" || return 1
+    chmod +x "$TEMP_BINARY" || return 1
+    mv -- "$TEMP_BINARY" "$MEDIAMTX_BIN" || return 1
+    TEMP_BINARY=""
+fi
+[[ "$("$MEDIAMTX_BIN" --version)" == "$MEDIAMTX_VERSION" ]] || {
+    echo "Expected MediaMTX $MEDIAMTX_VERSION. Move the old bin/mediamtx aside and run again."
+    return 1
+}
+"$MEDIAMTX_BIN" --validate-conf "$SCRIPT_DIR/mediamtx.yml" || return 1
+}
+
+if .venv/bin/python -c 'import config; raise SystemExit(not config.CAMERA_ENABLED)'; then
+    if prepare_camera; then
+        echo "Starting optional MediaMTX camera service."
+        "$MEDIAMTX_BIN" "$SCRIPT_DIR/mediamtx.yml" &
+        MEDIAMTX_PID=$!
+    else
+        echo "Camera service unavailable. Pi API remains running; see camera error above."
+    fi
+else
+    echo "Camera service disabled by PI_CAMERA_ENABLED=0. Pi API remains running."
 fi
 
-# Activate Virtual Environment
-source .venv/bin/activate
-
-# Install / update dependencies
-echo "Checking Python dependencies..."
-pip install -r requirements.txt > /dev/null 2>&1
-
-# Run FastAPI Server via Uvicorn on Port 8000
-echo "Launching FastAPI Server on http://0.0.0.0:8000..."
-python3 server.py
+# Camera failure must not terminate otherwise usable robot components.
+set +e
+if ! kill -0 "$API_PID" 2>/dev/null; then
+    wait "$API_PID"
+    CHILD_STATUS=$?
+    EXITED_PID="$API_PID"
+elif [[ -n "$MEDIAMTX_PID" ]]; then
+    wait -n -p EXITED_PID "$API_PID" "$MEDIAMTX_PID"
+    CHILD_STATUS=$?
+else
+    wait "$API_PID"
+    CHILD_STATUS=$?
+    EXITED_PID="$API_PID"
+fi
+set -e
+if [[ "${EXITED_PID:-}" == "$API_PID" ]]; then
+    exit "$CHILD_STATUS"
+fi
+echo "MediaMTX exited. Pi API stays running without video; restart launcher after fixing camera."
+MEDIAMTX_PID=""
+set +e
+wait "$API_PID"
+CHILD_STATUS=$?
+set -e
+exit "$CHILD_STATUS"

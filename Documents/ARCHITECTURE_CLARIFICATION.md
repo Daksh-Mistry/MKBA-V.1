@@ -1,5 +1,7 @@
 # 🤖 Robo 2.0 - System Architecture
 
+> **Historical architecture:** See [SYSTEM_IMPLEMENTATION.md](SYSTEM_IMPLEMENTATION.md) for the implemented backend/frontend/ML/Pi system and [PI/README.md](../PI/README.md) for the current protocol. The old Pi 4/8765/MJPEG descriptions below are not current.
+
 ## 📋 Project Overview
 - **Raspberry Pi 4 (Server)**: Runs local server (`server.py`), controls hardware (Motors, Servos, Sensors, Relay), and streams MJPEG video.
 - **Laptop/PC (Client)**: Runs `auto_mode.py`, which launches a Web UI (`index.html`) for manual control (WASD) or AI command injection.

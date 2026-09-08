@@ -1,0 +1,3 @@
+# Computer services. Install an appropriate PyTorch build first (README).
+-r ML/requirements-vision.txt
+-r Backend/requirements.txt

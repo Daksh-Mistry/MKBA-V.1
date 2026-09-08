@@ -1,6 +1,6 @@
 # Current Raspberry Pi command protocol
 
-Updated 2026-09-08. This document supersedes the original protocol inventory in PI_REVIEW_TRACKER.md.
+Historical protocol inventory, 2026-09-08. **Current Pi 2.3 commands, replies and deadlines are in [PI/README.md](../PI/README.md#commands-and-replies) and [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md). Pi tokens were removed; `.env` is optional and all sensor inputs are read automatically.** Examples and findings below preserve the earlier implementation, not the current contract.
 
 Connect to `ws://<PI_IP>:8000/ws`. Send one JSON object per WebSocket text message.
 

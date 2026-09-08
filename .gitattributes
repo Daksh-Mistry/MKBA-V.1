@@ -1,2 +1,2 @@
-# Raspberry Pi startup scripts must retain Unix line endings on Windows checkouts.
+# Pi shell launchers must retain Linux line endings after a Windows checkout.
 *.sh text eol=lf

@@ -1,112 +1,51 @@
-# Raspberry Pi robot server — Bookworm setup
+# Raspberry Pi server — API 2.3
 
-This folder runs on the Raspberry Pi. Your laptop backend sends JSON commands over WebSocket; the Pi controls motors, pan/tilt servos and the pump, and returns sensor/status data. MediaMTX provides the camera stream separately.
+The computer backend sends JSON commands to this server. The Pi controls hardware and sends readings back. MediaMTX provides video separately.
 
-**Target:** Raspberry Pi 5, Raspberry Pi OS **Bookworm 64-bit**, system Python 3.11, a PCA9685 servo board, and a supported Raspberry Pi CSI camera. Desktop and Lite editions can be used; these instructions work over SSH.
+**No Pi token, `.env` file or sensor enable list is required.** Use the same server with a bare Pi, a few components or the complete robot. All eight sensor inputs are attempted automatically. Missing hardware is reported individually and does not prevent the API from starting.
 
-## Readiness — read before starting
+`.venv` holds the Python packages installed on the Pi; it is still needed. The optional `.env` only overrides defaults such as the port or speaker device.
 
-**The three source syntax blockers are fixed.** The extra opening strings in `hardware/motors.py`, `hardware/sensors.py`, and `hardware/relay_led.py` were converted to comments with the owner's permission. Hardware-control logic was not changed. All 16 Python files compile and all 10 command tests pass.
+## 1. Copy the update
 
-The real server and hardware package now import successfully with fake GPIO/ServoKit, and safe mode and cleanup execute in that test. Server shutdown was also verified with hardware doubles. Actual GPIO, I2C, motor power and camera operation still need checking on your Pi. Follow the setup steps and pass step 5 before first startup. See [verification results](../Documents/PI_VERIFICATION.md) for the remaining issues; these checks are not a claim that the entire robot is ready for unattended operation.
+Stop the old launcher with Ctrl+C. From Windows PowerShell in `C:\Users\d\Desktop\Robo`:
 
-The `.verification` directory beside the repository is a developer-only test workspace containing portable **Windows Python**, test harnesses and results. It is not a server dependency and must not be copied to the Pi. The Pi creates its own Linux `.venv` below.
-
-## 1. Prepare the OS and network
-
-For a fresh SD card, select Raspberry Pi 5 and **Raspberry Pi OS Bookworm 64-bit** in Raspberry Pi Imager, using the official Bookworm image if it is not the default choice. Set your own username/password, hostname (for example `robo`), Wi-Fi country/network if needed, and enable SSH. If Bookworm is already installed, do not reflash it.
-
-Connect from your laptop, substituting your actual user and IP:
-
-```bash
-ssh YOUR_PI_USER@YOUR_PI_IP
+```powershell
+scp .\pi-update-2.3.tar.gz raspberry@10.22.99.126:~/
 ```
 
 On the Pi:
 
 ```bash
+mkdir -p ~/Desktop/MKBA-V.1
+tar -xzf ~/pi-update-2.3.tar.gz -C ~/Desktop/MKBA-V.1
+cd ~/Desktop/MKBA-V.1/PI
+```
+
+The archive contains `PI/` and `Documents/`, excluding private settings, environments and downloaded binaries. Your existing Pi `.venv` and camera binary remain in place. Old `PI_CONTROL_TOKEN`, `PI_FLAME_CHANNELS` and `PI_IR_CHANNELS` settings are ignored. Keep `PI_SIMULATION=0` if your old `.env` contains it.
+
+For a new deployment, copy the whole current `PI/` folder. Git clones do not include uncommitted local changes. Do not copy Windows Python, the computer environment or `.verification` to the Pi.
+
+## 2. Prepare Bookworm and Python
+
+Use **Raspberry Pi OS Bookworm 64-bit** on Pi 5. An existing installation does not need reflashing. Check:
+
+```bash
 cat /etc/os-release
 dpkg --print-architecture
 python3 --version
-hostname -I
 ```
 
-Expected: `VERSION_CODENAME=bookworm`, `arm64`, and Python `3.11.x`. Do not rely on `uname -m` alone to determine whether user-space is 64-bit. This project's launcher only configures its camera source in its `aarch64` branch; use a 64-bit installation for these instructions.
-
-Install OS dependencies:
+Expected: `bookworm`, `arm64`, Python `3.11.x`. Install OS dependencies:
 
 ```bash
 sudo apt update
-sudo apt full-upgrade
 sudo apt install -y python3-venv python3-pip python3-dev build-essential \
-  python3-lgpio python3-libgpiod libgpiod-dev i2c-tools \
-  rpicam-apps-lite avahi-daemon wget curl ca-certificates tar procps
+  python3-lgpio python3-libgpiod libgpiod-dev \
+  curl ca-certificates tar util-linux
 ```
 
-Keep your APT sources on Bookworm. Normal APT upgrades update the installed release; changing to Trixie is not needed for this project. See the official [Raspberry Pi OS update and Python guidance](https://www.raspberrypi.com/documentation/computers/os.html).
-
-If using `robo.local`, set the hostname once and enable mDNS:
-
-```bash
-sudo raspi-config nonint do_hostname robo
-sudo systemctl enable --now avahi-daemon
-```
-
-`config.MDNS_NAME` does not advertise or change the OS hostname. Use the IP address when `.local` resolution is unavailable.
-
-## 2. Enable the interfaces this wiring uses
-
-On the Pi, as your normal login user:
-
-```bash
-sudo raspi-config nonint do_i2c 0
-sudo raspi-config nonint do_spi 1
-sudo usermod -aG gpio,i2c,video "$(id -un)"
-sudo reboot
-```
-
-Here `0` enables I2C and `1` disables SPI. **Leave SPI disabled:** the project's IR sensors use GPIO 8, 9, 10 and 11, which overlap SPI0 pins. Generic guides that enable all interfaces are not appropriate for this wiring. The PCA9685 uses I2C, not SPI. The interface commands are documented in [Raspberry Pi configuration](https://www.raspberrypi.com/documentation/computers/configuration.html).
-
-Reconnect after reboot. If you set the hostname, try `ssh YOUR_PI_USER@robo.local`.
-
-## 3. Put this checkout on the Pi
-
-Copy the current files, including the local fixes. A GitHub clone will not include uncommitted changes from your development computer.
-
-From Windows PowerShell in `C:\Users\d\Desktop\Robo`:
-
-```powershell
-tar -czf pi-server.tar.gz --exclude=__pycache__ --exclude=.venv --exclude=bin -C MKBA-V.1 PI Documents
-scp .\pi-server.tar.gz YOUR_PI_USER@YOUR_PI_IP:~/
-```
-
-On the Pi, use a fresh destination or back up an existing deployment before extracting over it:
-
-```bash
-mkdir -p ~/MKBA-V.1
-tar -xzf ~/pi-server.tar.gz -C ~/MKBA-V.1
-cd ~/MKBA-V.1/PI
-```
-
-Only `PI` is needed to run the server; `Documents` contains the protocol and review notes. Do not install the laptop's `Backend/requirements.txt` on the Pi. The Pi server does not need YOLO, OpenCV or a Gemini API key.
-
-## 4. Install Python packages in the Pi's virtual environment
-
-This project uses **rpi-lgpio**, which supplies the `RPi.GPIO` import on Pi 5. The old `RPi.GPIO` distribution must not be installed in the same environment. The [rpi-lgpio installation guide](https://rpi-lgpio.readthedocs.io/en/latest/install.html) documents both the conflict and the system-package-backed virtual environment used here.
-
-Check whether the old system package is installed:
-
-```bash
-dpkg-query -W -f='${Status}\n' python3-rpi.gpio
-```
-
-If it says `install ok installed`, remove that old implementation (APT will show any other affected packages):
-
-```bash
-sudo apt remove python3-rpi.gpio
-```
-
-A message saying the package is not installed is fine. Then, from `~/MKBA-V.1/PI`:
+From `PI/`:
 
 ```bash
 python3 -m venv --system-site-packages .venv
@@ -114,223 +53,184 @@ source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 python -m pip check
-python -m pip show rpi-lgpio adafruit-circuitpython-servokit
+python -m compileall -q server.py config.py components.py audio.py api hardware
 ```
 
-`--system-site-packages` makes the APT-installed GPIO bindings available. ServoKit brings in Blinka and its Python dependencies; the OS packages above supply the Linux GPIO/I2C prerequisites. See [Adafruit's Raspberry Pi setup](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi). Do not run its generic interface-enabling script here because this robot needs SPI disabled.
+You can reuse the venv creation command without deleting an existing environment. `--system-site-packages` exposes the OS GPIO bindings. Bookworm protects system Python: install project packages in `.venv`, without `sudo pip`.
 
-Bookworm protects system Python. Use the activated `.venv` for pip; do not use `sudo pip` or `--break-system-packages`. After opening a new terminal, run `cd ~/MKBA-V.1/PI` and `source .venv/bin/activate` again.
-
-## 5. Check source and dependencies before touching hardware
-
-From `PI` with `.venv` active:
+**Pi 5 GPIO:** `rpi-lgpio` supplies the `RPi.GPIO` import. The old distribution named `RPi.GPIO` conflicts with it. If you get `Cannot determine SOC peripheral base address`, check `python -m pip show RPi.GPIO rpi-lgpio` and `dpkg-query -W python3-rpi.gpio`. Remove the old pip distribution using `python -m pip uninstall RPi.GPIO`; remove the old system package using `sudo apt remove python3-rpi.gpio` if installed. Then reinstall the correct provider:
 
 ```bash
-python -m compileall -q server.py config.py api hardware
-python -m unittest tests.test_protocol
-python -c "import fastapi, uvicorn, RPi.GPIO, lgpio, board, adafruit_servokit; print('Dependency imports OK')"
+python -m pip install --force-reinstall --no-deps rpi-lgpio
 ```
 
-**Do not continue if compilation fails.** The previous three `from __future__` errors have been fixed. If you still see them, check that you copied the updated files. Opening notes now use real comments, for example:
+See the [rpi-lgpio installation guide](https://rpi-lgpio.readthedocs.io/en/latest/install.html) and [Raspberry Pi OS Python guidance](https://www.raspberrypi.com/documentation/computers/os.html).
 
-```python
-"""Module description."""
-# Additional module notes belong in comments or inside the docstring above.
-from __future__ import annotations
-```
+`requirements-core.txt` is available for an API-only installation. The `requirements.txt` command above also installs the libraries needed for real GPIO. GPIO setup can succeed even when no sensor is attached.
 
-The protocol suite has 10 tests and uses mocked hardware; it does not move motors or servos. Do not use the older `tests/test_all.py` as an installation check: it still references removed camera code and old servo values.
-
-## 6. Connect and check the hardware
-
-Power off before changing wiring. Use the external supplies appropriate to the motors, pump and servos; GPIO pins are control signals, not actuator power supplies. Keep actuator power disconnected for the initial software checks. The server centers servos during initialization and stop.
-
-The current `config.py` uses **BCM GPIO numbers**, not physical header numbers:
-
-| Component | Mapping |
-|---|---|
-| Left motor bank | ENA 18, IN1 22, IN2 27 |
-| Right motor bank | ENB 13, IN3 23, IN4 24 |
-| Flame sensors | 5, 6, 12, 16 |
-| IR sensors | 10, 9, 11, 8 |
-| Pump relay | 17; active-low by default |
-| Status LED | Not configured |
-| PCA9685 | I2C bus 1; SDA GPIO 2 (physical 3), SCL GPIO 3 (physical 5) |
-| Pan / tilt servos | PCA9685 channels 0 / 1; default 90° / 90° |
-
-Sensor arrays are ordered front-left, front-right, rear-left, rear-right. Keep the owner's tested wiring and supply arrangement; check `config.py` against the assembled robot.
-
-After I2C is enabled and the PCA9685 is connected, check:
+## 3. Start the normal server
 
 ```bash
-groups
-ls -l /dev/i2c-1 /dev/gpiochip*
-i2cdetect -y 1
+chmod +x start_robo.sh
+./start_robo.sh
 ```
 
-The code uses ServoKit's default PCA9685 address, `0x40`. An additional `0x70` response may be the PCA9685 all-call address. Missing `0x40` means the expected board is not reachable; fix power, SDA/SCL, address or permissions before running the server. There is no working full-hardware simulation switch in this checkout.
+No configuration file or token generation is needed. The launcher uses `.venv`, starts the API on port 8000 and attempts the camera service. Camera download/setup failure does not stop the API.
 
-For a CSI camera, use the correct Pi 5 camera cable. Before starting MediaMTX:
-
-```bash
-rpicam-hello --list-cameras
-rpicam-hello --nopreview --timeout 2000
-```
-
-Bookworm uses `rpicam-*` applications. Stop any camera test before starting the streamer so the camera is not already in use. See [Raspberry Pi camera documentation](https://www.raspberrypi.com/documentation/computers/camera_software.html). A USB webcam or a camera requiring a custom libcamera build needs a different MediaMTX setup.
-
-## 7. First API start
-
-Once steps 5 and 6 pass:
-
-```bash
-cd ~/MKBA-V.1/PI
-source .venv/bin/activate
-python server.py
-```
-
-This starts only the robot API, with one process on TCP port 8000. Keep the terminal open. Do not use multiple workers or auto-reload with GPIO hardware. Use `python server.py`, not `uvicorn server:app`, because the executable entry point wires the graceful `system.shutdown` callback.
-
-In a second Pi terminal:
+In another terminal:
 
 ```bash
 curl http://127.0.0.1:8000/
-cd ~/MKBA-V.1/PI
-.venv/bin/python test_websocket.py
+curl http://127.0.0.1:8000/status
 ```
 
-Expected: health JSON containing `status: online`, then a WebSocket greeting. The test sends a zero-direction drive command. Health is not proof that all hardware initialized successfully: inspect the startup logs too.
+From the computer, open **http://10.22.99.126:8000/status**. `/` must report `version: "2.3"`, `simulation: false`, `authentication_required: false`.
 
-From your laptop use `http://YOUR_PI_IP:8000/` and `ws://YOUR_PI_IP:8000/ws`. `/docs` documents HTTP routes; it does not provide buttons for these WebSocket commands.
+`online` means the API runs. Inspect each component's state for hardware readiness. A missing PCA9685 or camera is expected on a bare Pi. GPIO-ready motors/pump means their pins initialized, not that actuators are attached. Unavailable servo/pump interfaces give `null`. Unreadable sensors give `-1`; readable unplugged inputs can still give `0` or `1` because of pull-ups.
 
-Press **Ctrl+C** in the server terminal to stop before starting the combined launcher.
+Ctrl+C stops the launcher and its children. `system.shutdown` exits the script and streamer without powering off the OS. One launcher and one control WebSocket may run at a time. Pi API access has no authentication in this version; any device able to reach port 8000 can access it.
 
-## 8. Start API and camera together
+## 4. Debug sensors as you connect them
 
-From `PI`:
+Stop the computer backend before using the WebSocket diagnostic, so the control connection is free. In another Pi terminal:
 
 ```bash
-bash start_robo.sh
+cd ~/Desktop/MKBA-V.1/PI
+.venv/bin/python test_websocket.py --seconds 30
 ```
 
-The script downloads MediaMTX **v1.20.1** if `bin/mediamtx` is missing, sets the camera source and starts it in the background, then activates `.venv`, checks dependencies and runs `server.py`. The first launch requires internet access. Keep the script in the foreground for initial testing.
+It uses the normal `/ws` endpoint, sends heartbeats, and prints readings and `CHANGE` messages. It sends no drive, pump or servo commands. Opening/closing the connection still performs normal Stop behavior, including centering available servos. While the backend is connected, inspect `/status` instead; that endpoint does not claim control.
 
-MediaMTX's native Pi camera support includes Bookworm. Its configuration here is `/cam`, 1280×720, 60 FPS; actual camera and CPU capability determine whether that rate is achievable. See the [MediaMTX Pi camera guide](https://mediamtx.org/docs/publish/raspberry-pi-cameras) and the [pinned release](https://github.com/bluenviron/mediamtx/releases/tag/v1.20.1).
+For each connected sensor, apply and remove its intended stimulus several times. Check that the **correct channel changes each time**, then returns to baseline. No channel registration or `.env` edit is needed. Power down before changing wiring; restart after fixing GPIO/I2C initialization problems.
 
-| Use | Address / port |
+Example diagnostic row:
+
+```text
+ir_array[0] GPIO 10: raw=0 value= 0 samples=150 changes=6 errors=0 available / signal_changed
+```
+
+| Field | Meaning |
 |---|---|
-| Robot API / WebSocket | TCP 8000: `http://YOUR_PI_IP:8000/`, `ws://YOUR_PI_IP:8000/ws` |
-| Camera browser viewer | TCP 8889: `http://YOUR_PI_IP:8889/cam` |
-| WebRTC media | UDP 8189 by default; must be reachable between laptop and Pi |
-| Optional RTSP reader | TCP 8554: `rtsp://YOUR_PI_IP:8554/cam` when using RTSP over TCP |
+| `raw` | Electrical GPIO level reconstructed from the existing driver; `?` when unreadable. |
+| `value` | Backend reading: `0`, `1` or `-1` for unreadable. |
+| `samples` | Successful reads since server startup. |
+| `changes` | Transitions between successive valid readings. Errors do not create transitions. |
+| `errors` | Failed reads; initialization failures appear separately in `reason`. |
+| `no_valid_reading` | No successful sample yet. Inspect GPIO setup and the reported reason. |
+| `steady_signal` | Reads succeed but have not changed. Attachment/function is unproven. |
+| `signal_changed` | A transition was observed. Match repeated transitions to your test stimulus; noise also causes transitions. |
 
-The [MediaMTX configuration](https://github.com/bluenviron/mediamtx/blob/v1.20.1/mediamtx.yml) defines the media ports; opening the viewer's TCP port alone is not always enough for video. Use the same reachable LAN and check Wi-Fi client isolation if necessary. The Pi control endpoint currently has no authentication; keep it on your trusted local network.
+Counters are included in normal status at `hardware.sensors.channels`. They reset on restart and count telemetry and `/status` reads. WebSocket sampling is approximately 5 Hz, so very brief pulses can be missed. Temporary read errors are retried on the next sample. One failed input does not hide the others.
 
-The existing laptop web UI and vision backend still request the removed `/video.mjpg` endpoint. Test the MediaMTX viewer directly until those clients are migrated.
+**A bare Pi can prove the API and GPIO input path work. It cannot prove an absent sensor works.** Repeatable response to the intended stimulus is the practical check for an attached sensor. A fixed high/low reading alone proves neither success nor failure.
 
-**If camera video is missing:** the launcher hides MediaMTX output. Stop the combined script with Ctrl+C, then run the streamer alone in the foreground to see its errors:
+### Pin map and meanings
+
+These are **BCM GPIO numbers**, not physical header-pin numbers. Change `config.py` only if your wiring differs.
+
+| Position / index | Flame GPIO | IR GPIO |
+|---|---:|---:|
+| Front-left / 0 | 5 | 10 |
+| Front-right / 1 | 6 | 9 |
+| Rear-left / 2 | 12 | 11 |
+| Rear-right / 3 | 16 | 8 |
+
+The flame driver inverts its input: electrical LOW becomes flame value `1`, HIGH becomes `0`. IR preserves the electrical level; measure your module's clear/blocked polarity. Inputs use pull-ups. An unplugged input is not evidence of clearance. Signals must be 3.3 V compatible with an appropriate common ground.
+
+Other mappings: left motor ENA 18 / IN1 22 / IN2 27; right motor ENB 13 / IN3 23 / IN4 24; pump relay GPIO 17; PCA9685 pan channel 0 / tilt channel 1, centered at 90/90 degrees. Use suitable external actuator supplies; GPIO pins are signals, not motor/servo/pump power outputs.
+
+## 5. Enable optional hardware when needed
+
+**IR inputs:** leave SPI disabled; SPI0 overlaps the sensor pins GPIO 8–11:
 
 ```bash
-cd ~/MKBA-V.1/PI
-MTX_WEBRTCADDRESS=:8889 \
-MTX_PATHS_CAM_SOURCE=rpiCamera \
-MTX_PATHS_CAM_RPICAMERAWIDTH=1280 \
-MTX_PATHS_CAM_RPICAMERAHEIGHT=720 \
-MTX_PATHS_CAM_RPICAMERAFPS=30 \
-./bin/mediamtx
+sudo raspi-config nonint do_spi 1
 ```
 
-This diagnostic uses 30 FPS. If that works, change the launcher's camera FPS to match your tested setting before using it normally. If the binary was not downloaded, download/extract the Linux arm64 archive from the pinned release into `PI/bin` and make `bin/mediamtx` executable. Stop the foreground diagnostic before restarting the combined launcher.
+**Servos:** I2C can wait until the PCA9685 is attached. Install tools, enable I2C, apply group membership and reboot:
 
-## 9. Commands and stopping
+```bash
+sudo apt install -y i2c-tools
+sudo raspi-config nonint do_i2c 0
+sudo usermod -aG gpio,i2c,video,audio "$(id -un)"
+sudo reboot
+```
 
-Send each object as a WebSocket **text** message:
+Here `0` enables I2C and `1` disables SPI. After reboot, `i2cdetect -y 1` should find a connected default PCA9685 at `0x40`; GPIO 2/3 are SDA/SCL. Restart the launcher after setup changes. See [Raspberry Pi configuration](https://www.raspberrypi.com/documentation/computers/configuration.html) and [Adafruit Pi setup](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi).
 
-| Message | Meaning |
+**Camera:** install `sudo apt install -y rpicam-apps-lite`, connect the supported camera and check `rpicam-hello --list-cameras`. Stop camera diagnostics before launching MediaMTX. The launcher downloads a version/checksum-checked binary to `PI/bin`. If it reports an older binary, stop the launcher, run `mv bin/mediamtx bin/mediamtx.previous`, then restart.
+
+| Consumer | Camera URL |
 |---|---|
-| `{"type":"drive","left":1,"right":-1,"speed":0.3}` | Motor directions and 30% power; physical forward/reverse depends on wiring. |
-| `{"type":"drive","left":0,"right":0,"speed":0}` | Stop both motor banks. |
-| `{"type":"servo","pan":5,"tilt":-5}` | Relative degrees, not absolute positions or microseconds. |
-| `{"type":"pump","on":false}` | Pump off. Use JSON booleans, never strings. |
-| `{"type":"mode","value":"manual"}` | Set Pi's mode label only. |
-| `{"type":"system","command":"stop"}` | Motors stop, pump off, servos centered at 90°/90°; API stays running. |
-| `{"type":"system","command":"shutdown"}` | Stop hardware and exit the server; the combined launcher then cleans up MediaMTX. The Pi OS stays on. |
+| Browser viewer | `http://PI_IP:8889/cam` |
+| Browser WebRTC endpoint | `http://PI_IP:8889/cam/whep` |
+| ML direct RTSP | `rtsp://PI_IP:8554/cam` |
 
-`stop` is not latched and new commands can restart movement. There is no command-expiry watchdog. `speed` in status currently stays at its default even after different commanded speeds; this reporting bug is tracked. Full schemas and sensor meanings: [PI_PROTOCOL.md](../Documents/PI_PROTOCOL.md).
+WebRTC also uses UDP 8189. Loading the viewer page does not prove frames are available. Optional `PI_CAMERA_ENABLED=0` skips the streamer, but is not required for bare-Pi startup.
 
-For a manual SSH session, Ctrl+C stops the foreground launcher. A background process started independently is not owned by that launcher. OS shutdown is a separate administrator action, not a WebSocket command.
+**Speaker:** install `sudo apt install -y espeak-ng alsa-utils`. Inspect devices with `aplay -L`. The ALSA default is used unless optional `PI_SPEECH_DEVICE` selects another device. Listen to confirm playback; tool availability alone does not prove audible sound. Speech requires an active controller heartbeat.
 
-## 10. Optional systemd startup — only after manual tests pass
+## Commands and replies
 
-The checked-in `robo.service` assumes user `pi` and `/home/pi/Robo2.0/PI`, and has its boot install target commented. Do not copy it unchanged for a different username/path. Generate a service matching the normal user and current `PI` directory:
+Connect to `ws://PI_IP:8000/ws`, without a token or Authorization header. Send one JSON object per WebSocket text message. The computer backend normally owns this single control connection. `/status` remains available alongside it.
+
+| Message to Pi | Effect |
+|---|---|
+| `{"type":"heartbeat"}` | Keeps control alive. Send about every 250 ms. |
+| `{"type":"drive","left":1,"right":-1,"speed":0.3}` | Positive sides become `1`, negative sides `-1`; `0` stops that side. Speed is 0–1. Refresh held drive before 400 ms. |
+| `{"type":"servo","pan":5,"tilt":-5}` | Relative angle changes, -180…180 degrees. Omitted/null axes stay unchanged. Resulting angles clamp to 0…180. |
+| `{"type":"pump","on":true}` | On for at most 1 second; `false` turns off. Repeated on does not extend a burst. Send off before another burst after expiry. |
+| `{"type":"mode","value":"auto"}` | Stores `manual`/`auto`; decisions run on the computer. |
+| `{"type":"system","command":"stop"}` | Stops available motors/pump/speech and centers available servos. API stays running. |
+| `{"type":"system","command":"shutdown"}` | Stops actions and exits the server/launcher, leaving the OS running. |
+
+Optional `request_id` is a string of 1–128 characters. Unknown commands/fields, non-finite numbers and incorrect types are rejected. Removed commands have no aliases: `servo_delta`, `speed_scalar`, `emergency_stop`, `reboot`.
+
+Pi sends these JSON types:
+
+- `hello`: version, mode, capabilities, hardware state and deadlines, once on connection.
+- `status`: readings, hardware diagnostics, mode, speed, servo angles, pump, safety and speech; approximately 5 times/second while connected.
+- `heartbeat_ack`: acknowledgement with optional matching request ID.
+- `error`: reason and optional request ID; unavailable hardware also includes `code: "hardware_unavailable"` and `component`.
+
+Other commands have no generic success acknowledgement; inspect status. Servo angles are controller readback, not measured physical position. Pump state is software relay state, not water-flow measurement.
+
+One second of control silence stops outputs and closes the socket (1008); reconnect to regain control. Drive also expires after 400 ms without a new drive request. Runtime actuator failures stop available outputs and expire control. Startup absence of one component does not prevent another working component being used. Pi Stop allows later commands; the backend adds explicit Resume.
+
+HTTP endpoints also need no token:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | API health, version and component setup state. |
+| `GET /status` | Current readings and diagnostics without claiming control. |
+| `GET /speech` | Speaker status. |
+| `POST /speech` | `{"request_id":"say-1","text":"Hello"}`; 1–500 characters, active controller required. 202 means accepted. |
+| `DELETE /speech` | Cancel playback. |
+| `GET /docs` | HTTP API reference. |
+
+See [Pi implementation record](../Documents/PI_PARTIAL_HARDWARE.md) for changes and verification. The computer UI's handling of nullable hardware states is a separate integration task; use Pi `/status` and its diagnostic for partial-hardware checks now.
+
+## Verification and troubleshooting
+
+Optional checks from `PI/`:
 
 ```bash
-cd ~/MKBA-V.1/PI
-ROBO_USER="$(id -un)"
-ROBO_DIR="$(pwd -P)"
-sudo tee /etc/systemd/system/robo.service >/dev/null <<EOF
-[Unit]
-Description=Robo Raspberry Pi server and camera
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=$ROBO_USER
-WorkingDirectory=$ROBO_DIR
-ExecStart=/bin/bash $ROBO_DIR/start_robo.sh
-Restart=on-failure
-RestartSec=3
-KillMode=control-group
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl start robo.service
-sudo systemctl status robo.service --no-pager
-journalctl -u robo.service -n 100 --no-pager
+.venv/bin/python -m pip install httpx
+.venv/bin/python -m unittest discover -s tests
+.venv/bin/python test_websocket.py --seconds 10 --watchdog
 ```
 
-This assumes the shown deployment path has no spaces. After service startup is verified, enable boot startup:
-
-```bash
-sudo systemctl enable robo.service
-```
-
-Operations:
-
-```bash
-sudo systemctl stop robo.service
-sudo systemctl start robo.service
-journalctl -u robo.service -f
-```
-
-`Restart=on-failure` allows an intentional clean `system.shutdown` to remain stopped for this boot; `systemctl start` starts it again. If the service is enabled, the next OS boot starts it. Do not run another manual server while the service owns GPIO/camera resources. Dependency and MediaMTX errors suppressed by the script will not appear in the journal; use the foreground diagnostic commands above.
-
-## Troubleshooting
+Unit tests use test doubles without operating GPIO. The final command connects to the running server and intentionally lets its heartbeat expire. Record physical results in [PI_HARDWARE_ACCEPTANCE.md](../Documents/PI_HARDWARE_ACCEPTANCE.md).
 
 | Symptom | Check |
 |---|---|
-| `from __future__ imports must occur...` | Copy the updated hardware files; the extra opening strings have been converted to comments. OS packages cannot fix an outdated source copy. |
-| `externally-managed-environment` | Activate `.venv`; use its Python for pip. |
-| `Cannot determine SOC peripheral base address` | Verify rpi-lgpio is installed and old RPi.GPIO is absent from the same environment. |
-| `GPIO busy` / cannot claim a line | Stop duplicate server/diagnostic processes; ensure SPI is disabled on this wiring. |
-| I2C permission denied / missing device | Enable I2C, check `i2c` group, reboot, check `/dev/i2c-1`. |
-| PCA9685 missing / no status messages | Check address 0x40 and wiring; failed servo initialization can suppress telemetry. |
-| Camera not found / busy | Check `rpicam-hello --list-cameras`, cable, and other processes using it. |
-| Viewer opens but no video | Run MediaMTX in foreground; check UDP 8189, camera FPS and network reachability. |
-| Connection refused | Check logs and `ss -ltnp`; verify the actual Pi IP and port 8000. |
-| Backend quits while browser is open | Known missing-browser-heartbeat issue; test the Pi API independently first. |
+| Wrong version / unknown heartbeat | Stop old process, copy the whole update, restart from the correct folder. |
+| GPIO peripheral-base-address error | Replace conflicting old RPi.GPIO provider using the Pi 5 steps above. |
+| GPIO permission/busy error | User's `gpio` group, SPI disabled, no other process owning the pins. |
+| PCA9685 unavailable | I2C, board power/wiring/address and ServoKit. Other components can work. |
+| Fixed sensor reading | Supply/ground/signal, pin assignment, threshold and intended stimulus. |
+| Sensor value -1 | Inspect the channel's setup/read failure `reason`. |
+| WebSocket rejected | Another controller owns it; use `/status` or stop the backend first. |
+| Camera failure | Camera discovery, streamer log and binary version; API should stay running. |
 
-Keep a deployment record after successful Pi testing:
-
-```bash
-.venv/bin/python -m pip freeze > deployed-python-packages.txt
-uname -a
-cat /etc/os-release
-./bin/mediamtx --version
-```
-
-The package list records what was installed on that Pi; it is not a substitute for checking hardware behavior. Track remaining work in [PI_REVIEW_TRACKER.md](../Documents/PI_REVIEW_TRACKER.md).
+For automatic startup later, `robo.service` is a template. Edit its user and paths before installing under `/etc/systemd/system/`. `Restart=on-failure` preserves a successful `system.shutdown`. Verify manual startup first.

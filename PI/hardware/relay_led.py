@@ -49,7 +49,7 @@ class RelayLED:
             except Exception as e:
                 print(f"  Relay/LED GPIO setup failed: {e}")
         else:
-            print("  Relay offline: RPi.GPIO not available (simulation mode)")
+            print("  Relay unavailable: RPi.GPIO is not installed.")
 
     def pump_on(self):
         self._pump = True

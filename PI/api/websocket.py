@@ -1,83 +1,119 @@
-"""WebSocket control router and telemetry dispatcher for Robo 2.0."""
-
+"""Single-controller JSON commands and telemetry (video is separate)."""
 import asyncio
 import json
 import math
-from typing import Set
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import config
+from components import HardwareUnavailable
 
 websocket_router = APIRouter(tags=["WebSocket"])
-
-# Connected WebSocket clients set
-active_websockets: Set[WebSocket] = set()
-
-# Hardware references (injected from server)
+active_websockets = set()
 _robot_ref = None
+_owner = None
+_send_locks = {}
+
 
 def set_robot_reference(robot):
     global _robot_ref
     _robot_ref = robot
 
 
-async def dispatch_ws_message(websocket: WebSocket, message: str):
-    """Parses and executes incoming JSON control commands from clients."""
-    if not _robot_ref:
-        return
-    try:
-        data = json.loads(message)
-        kind = data.get("type")
+async def send_json(websocket, data):
+    lock = _send_locks.get(id(websocket))
+    if lock is None:
+        await websocket.send_text(json.dumps(data, allow_nan=False))
+    else:
+        async with lock:
+            await asyncio.wait_for(websocket.send_text(json.dumps(data, allow_nan=False)), 0.5)
 
-        # Verbose logging filter (suppress high-frequency drive pings)
-        if kind not in ("drive", "servo", "pump", "heartbeat"):
-            print(f"📥 Received Command [{kind}]: {data}")
+
+FIELDS = {
+    "drive": {"left", "right", "speed"}, "servo": {"pan", "tilt"},
+    "pump": {"on"}, "mode": {"value"}, "system": {"command"}, "heartbeat": set(),
+}
+
+
+async def dispatch_ws_message(websocket, message):
+    """Validate the entire message before touching hardware; route is already authenticated."""
+    if _robot_ref is None:
+        return
+    request_id = None
+    try:
+        if len(message) > 4096:
+            raise ValueError("message is too large")
+        data = json.loads(message)
+        if not isinstance(data, dict):
+            raise ValueError("message must be a JSON object")
+        request_id = data.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or not 1 <= len(request_id) <= 128):
+            request_id = None
+            raise ValueError("request_id must be a string of 1 to 128 characters")
+        kind = data.get("type")
+        if not isinstance(kind, str) or kind not in FIELDS:
+            raise ValueError("unknown command type")
+        if set(data) - FIELDS[kind] - {"type", "request_id"}:
+            raise ValueError("unexpected command fields")
+        if _robot_ref.shutting_down:
+            raise ValueError("server is shutting down")
+
+        safe_system = kind == "system" and data.get("command") in ("stop", "shutdown")
+        if not safe_system:
+            try:
+                _robot_ref.require_control_lease()
+            except ValueError as exc:
+                await send_json(websocket, {"type": "error", "code": "control_lease_expired", "message": str(exc),
+                                           **({"request_id": request_id} if request_id else {})})
+                await websocket.close(code=1008, reason="control lease expired; reconnect required")
+                return
 
         if kind == "drive":
             left = direction(data.get("left", 0), "left")
             right = direction(data.get("right", 0), "right")
             speed = number(data.get("speed", config.DEFAULT_SPEED), "speed", 0, 1)
             _robot_ref.drive(left, right, speed)
-
         elif kind == "servo":
-            pan = data.get("pan")
-            tilt = data.get("tilt")
+            pan, tilt = data.get("pan"), data.get("tilt")
+            if pan is None and tilt is None:
+                raise ValueError("servo requires pan or tilt")
             if pan is not None:
                 pan = number(pan, "pan", -180, 180)
             if tilt is not None:
                 tilt = number(tilt, "tilt", -180, 180)
-            if not _robot_ref.shutting_down:
-                _robot_ref.servos.set_pan_tilt(pan, tilt)
-
+            _robot_ref.move_servos(pan, tilt)
         elif kind == "pump":
-            on = bool(data.get("on", False))
-            if on and not _robot_ref.shutting_down:
-                _robot_ref.relay.pump_on()
-            else:
-                _robot_ref.relay.pump_off()
-
+            on = data.get("on")
+            if not isinstance(on, bool):
+                raise ValueError("on must be a JSON boolean")
+            _robot_ref.pump(on)
         elif kind == "mode":
-            _robot_ref.mode = str(data.get("value", _robot_ref.mode))
-            print(f"🔄 Mode Switched: {_robot_ref.mode}")
-
+            value = data.get("value")
+            if value not in ("manual", "auto"):
+                raise ValueError("mode value must be manual or auto")
+            _robot_ref.mode = value
         elif kind == "system":
-            cmd = data.get("command")
-            if cmd == "stop":
+            command = data.get("command")
+            if command == "stop":
                 _robot_ref.safe_mode()
-            elif cmd == "shutdown":
+            elif command == "shutdown":
                 _robot_ref.request_shutdown()
             else:
                 raise ValueError("system command must be stop or shutdown")
-        else:
-            raise ValueError(f"Unknown command type: {kind}")
-
-    except Exception as e:
-        print(f"⚠️ WS Message Dispatch Error: {e}")
-        await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+        elif kind == "heartbeat":
+            pass
+        # A stop/shutdown still works after timeout, but cannot revive its old
+        # control connection. Heartbeat is renewed before waiting on transport.
+        if not _robot_ref.control_expired:
+            _robot_ref.touch_control()
+        if kind == "heartbeat":
+            await send_json(websocket, {"type": "heartbeat_ack", **({"request_id": request_id} if request_id else {})})
+    except Exception as exc:
+        await send_json(websocket, {"type": "error", "message": str(exc),
+                                   **({"code": exc.code, "component": exc.component} if isinstance(exc, HardwareUnavailable) else {}),
+                                   **({"request_id": request_id} if request_id else {})})
 
 
 def direction(value, name):
-    """Reduce numeric direction to -1, 0 (stop), or 1; speed sets power."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a number")
     if isinstance(value, float) and not math.isfinite(value):
@@ -86,64 +122,83 @@ def direction(value, name):
 
 
 def number(value, name, minimum, maximum):
-    """Validate command numbers before touching any hardware."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a number")
-    if not math.isfinite(value) or not minimum <= value <= maximum:
+    if not minimum <= value <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
 
 
 @websocket_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Main bi-directional WebSocket control endpoint."""
-    await websocket.accept()
-    client_addr = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
-    print(f"📱 Client Connected via WebSocket: {client_addr}")
-
-    active_websockets.add(websocket)
+    global _owner
+    # Reserve ownership before the first await; a rejected second client cannot stop the owner.
+    if _owner is not None or _robot_ref is None:
+        await websocket.close(code=1008, reason="backend already connected or server unavailable")
+        return
+    _owner = websocket
     try:
-        current_mode = _robot_ref.mode if _robot_ref else "manual"
-        await websocket.send_text(json.dumps({"type": "hello", "mode": current_mode}))
-        
+        await websocket.accept()
+        active_websockets.add(websocket)
+        _send_locks[id(websocket)] = asyncio.Lock()
+        _robot_ref.control_connected()
+        await send_json(websocket, {
+            "type": "hello", "mode": _robot_ref.mode, "protocol_version": 2,
+            "server_version": "2.3", "hardware": _robot_ref.hardware.status(),
+            "capabilities": {"watchdog": True, "speech": True, "simulation": _robot_ref.simulation,
+                             "partial_hardware": True},
+            "watchdog": {"control_timeout_ms": 1000, "drive_timeout_ms": 400, "pump_max_on_ms": 1000},
+        })
         while True:
-            data = await websocket.receive_text()
-            await dispatch_ws_message(websocket, data)
-
-    except WebSocketDisconnect:
-        print(f"📱 Client Disconnected: {client_addr}")
-    except Exception as e:
-        print(f"⚠️ WebSocket Disconnect/Error ({client_addr}): {e}")
+            await dispatch_ws_message(websocket, await websocket.receive_text())
+    except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError):
+        pass
     finally:
         active_websockets.discard(websocket)
-        if len(active_websockets) == 0 and _robot_ref:
-            print("🛡️ No active clients remaining. Entering safe mode.")
-            _robot_ref.safe_mode()
+        _send_locks.pop(id(websocket), None)
+        if _owner is websocket:
+            _owner = None
+            if _robot_ref is not None:
+                _robot_ref.control_disconnected()
+
+
+async def close_connections(code=1001, reason=""):
+    for websocket in list(active_websockets):
+        try:
+            await asyncio.wait_for(websocket.close(code=code, reason=reason), 0.5)
+        except Exception:
+            pass
+
+
+async def broadcast_telemetry_once():
+    robot = _robot_ref
+    if robot is None or not active_websockets:
+        return
+    try:
+        payload = robot.telemetry()
+        # Sensor/serialization failures are telemetry faults. Transport closure
+        # below is a normal disconnection and must not overwrite a watchdog trip.
+        json.dumps(payload, allow_nan=False)
+    except Exception as exc:
+        robot.safe_mode("telemetry_error")
+        robot.faults = (robot.faults + [f"telemetry: {exc}"])[-8:]
+        return
+    for websocket in list(active_websockets):
+        try:
+            await send_json(websocket, payload)
+        except Exception:
+            active_websockets.discard(websocket)
+            # An old send may complete after that owner disconnected and a new
+            # connection claimed the slot. Never stop that newer owner here.
+            if _owner is websocket and _robot_ref is robot:
+                robot.control_disconnected()
+            try:
+                await asyncio.wait_for(websocket.close(code=1011), 0.5)
+            except Exception:
+                pass
 
 
 async def broadcast_telemetry_loop():
-    """Background task sending 10Hz status telemetry to all active clients."""
-    interval = 1.0 / config.SENSOR_HZ
     while True:
-        try:
-            if _robot_ref and active_websockets:
-                payload = {
-                    "type": "status",
-                    "mode": _robot_ref.mode,
-                    "speed": _robot_ref.speed,
-                    "servos": {"pan": _robot_ref.servos.pan.angle, "tilt": _robot_ref.servos.tilt.angle},
-                    "pump": _robot_ref.relay.state(),
-                    "sensors": _robot_ref.sensors.read(),
-                }
-                msg = json.dumps(payload)
-                disconnected = set()
-                for ws in list(active_websockets):
-                    try:
-                        await ws.send_text(msg)
-                    except Exception:
-                        disconnected.add(ws)
-                for ws in disconnected:
-                    active_websockets.discard(ws)
-        except Exception:
-            pass
-        await asyncio.sleep(interval)
+        await broadcast_telemetry_once()
+        await asyncio.sleep(1.0 / config.SENSOR_HZ)

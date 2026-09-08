@@ -36,7 +36,7 @@ class PanTilt:
                 self.pan.angle = 90
                 self.tilt.angle = 90
             except Exception as e:
-                print(f"PCA9685 Servo Hardware Not Found: {e} (Running Servo Simulation)")
+                print(f"PCA9685 servo unavailable: {e}")
                 self._pca = None
 
 

@@ -1,0 +1,5 @@
+# Sufficient for the API on a bare Pi; hardware imports are optional at runtime.
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+python-dotenv>=1.0,<2
+websockets>=14,<17

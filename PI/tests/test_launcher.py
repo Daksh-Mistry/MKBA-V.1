@@ -1,0 +1,95 @@
+"""Run the actual launcher with fake processes/tools; no network or GPIO."""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+
+BASH = shutil.which("bash")
+if not BASH and Path("C:/Program Files/Git/bin/bash.exe").exists():
+    BASH = "C:/Program Files/Git/bin/bash.exe"
+
+
+@unittest.skipUnless(BASH, "Bash is required to check launcher lifecycle")
+class LauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="pi-launcher-")
+        self.root = Path(self.temp.name)
+        self.bin = self.root / "test-tools"
+        self.bin.mkdir()
+        (self.root / "bin").mkdir()
+        (self.root / ".venv/bin").mkdir(parents=True)
+        shutil.copyfile(Path(__file__).resolve().parents[1] / "start_robo.sh", self.root / "start_robo.sh")
+        self.script(self.bin / "uname", 'if [[ "$1" == "-s" ]]; then echo Linux; else echo aarch64; fi')
+        self.script(self.bin / "dpkg", "echo arm64")
+        self.script(self.bin / "flock", "exit 0")
+        self.script(self.bin / "curl", 'echo "download unavailable for test" >&2; exit 7')
+        self.script(self.root / ".venv/bin/python", '''
+if [[ "$1" == "-c" ]]; then
+    if [[ "$2" == *"config.CAMERA_ENABLED"* ]]; then exit "${MOCK_CAMERA_DISABLED:-0}"; fi
+    exit 0
+fi
+echo started > api-started
+trap 'echo interrupted > api-interrupted; exit 90' TERM INT
+sleep 0.6
+echo completed > api-completed
+exit "${MOCK_API_EXIT:-0}"
+''')
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def script(self, path, content):
+        path.write_text("#!/usr/bin/env bash\n" + content + "\n", encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
+    def camera(self, *, version="v1.21.0", fail=False):
+        self.script(self.root / "bin/mediamtx", f'''
+if [[ "$1" == "--version" ]]; then echo {version}; exit 0; fi
+if [[ "$1" == "--validate-conf" ]]; then exit 0; fi
+echo started > camera-started
+trap 'echo stopped > camera-stopped; exit 0' TERM INT
+{'exit 9' if fail else 'while :; do sleep 0.1; done'}
+''')
+
+    def run_launcher(self, **variables):
+        env = dict(os.environ, PI_LAUNCH_TEST_BIN=self.bin.as_posix(),
+                   PI_LAUNCH_SCRIPT=(self.root / "start_robo.sh").as_posix(), **variables)
+        return subprocess.run([BASH, "-c", 'export PATH="$(cd "$PI_LAUNCH_TEST_BIN" && pwd):$PATH"; exec bash "$PI_LAUNCH_SCRIPT"'],
+                              env=env, cwd=self.root, text=True, capture_output=True, timeout=12)
+
+    def assert_api_completed(self, result, exit_code=0):
+        self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
+        self.assertTrue((self.root / "api-completed").exists(), result.stdout + result.stderr)
+        self.assertFalse((self.root / "api-interrupted").exists())
+
+    def test_camera_download_failure_keeps_api_running(self):
+        result = self.run_launcher()
+        self.assert_api_completed(result)
+        self.assertIn("Camera service unavailable", result.stdout)
+
+    def test_wrong_camera_binary_keeps_api_running(self):
+        self.camera(version="old-version")
+        self.assert_api_completed(self.run_launcher())
+        self.assertFalse((self.root / "camera-started").exists())
+
+    def test_camera_process_failure_keeps_api_running(self):
+        self.camera(fail=True)
+        result = self.run_launcher()
+        self.assert_api_completed(result)
+        self.assertIn("Pi API stays running without video", result.stdout)
+
+    def test_api_failure_exit_code_preserved_without_camera(self):
+        self.assert_api_completed(self.run_launcher(MOCK_CAMERA_DISABLED="1", MOCK_API_EXIT="7"), exit_code=7)
+
+    def test_clean_api_exit_cleans_owned_camera(self):
+        self.camera()
+        result = self.run_launcher()
+        self.assert_api_completed(result)
+        self.assertTrue((self.root / "camera-stopped").exists(), result.stdout + result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,8 +1,16 @@
 # Raspberry Pi review and command tracker
 
+> **Pi 2.3:** [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md) records removal of Pi tokens/channel lists, normal partial-hardware startup, observable sensor changes and current local verification. [PI/README.md](../PI/README.md) is the current setup guide.
+
+> **Current implementation:** [SYSTEM_IMPLEMENTATION.md](SYSTEM_IMPLEMENTATION.md) maps the completed backend/frontend/ML/Pi integration. [SYSTEM_VERIFICATION.md](SYSTEM_VERIFICATION.md) is the current verification record. Entries below preserve earlier review history and may have been resolved by the newer work.
+
+> **Historical architecture draft:** [SYSTEM_ARCHITECTURE_PLAN_V2.md](SYSTEM_ARCHITECTURE_PLAN_V2.md) records the earlier proposal.
+
+> **Earlier proposal:** [SYSTEM_ARCHITECTURE_PLAN.md](SYSTEM_ARCHITECTURE_PLAN.md) preserves the first design for comparison.
+
 > **Bookworm setup:** [PI/README.md](../PI/README.md) documents a fresh 64-bit Bookworm installation. The three syntax blockers were fixed with the owner's permission by changing only opening strings to comments. All 16 Python files compile; physical deployment remains unverified.
 
-> **Latest verification:** [PI_VERIFICATION.md](PI_VERIFICATION.md) records 10 passing command tests, real Uvicorn checks with hardware doubles, and remaining issues. After the header fix, the real server/hardware package imports and runs safe mode and cleanup with fake GPIO/ServoKit. Direction normalization preserves zero and converts other numeric values by sign. The API package import was fixed.
+> **Earlier verification:** [PI_VERIFICATION.md](PI_VERIFICATION.md) records the initial protocol/header fixes. Use the system verification linked above for current results.
 
 > **Current implementation:** See [PI_PROTOCOL.md](PI_PROTOCOL.md) for the simplified protocol and all Pi-to-backend JSON messages. The inventories below preserve the original review, not the current wire format. Problems 1–2 and the zero-angle portion of 13 have software fixes; 10 is corrected for WebSocket addresses. Hardware simulation and the old hardware diagnostic suite remain unchanged. System commands are now stop/script shutdown only. Hardware logic is unchanged; only opening comments were fixed.
 

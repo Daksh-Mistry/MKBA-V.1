@@ -1,0 +1,4 @@
+-r requirements.txt
+# Install the appropriate PyTorch CPU/CUDA build before this file (see README).
+ultralytics>=8.3,<9
+opencv-python>=4.10,<5

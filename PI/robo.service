@@ -1,5 +1,5 @@
 [Unit]
-Description=Robo 2.0 FastAPI Server Service
+Description=Robo Pi API and camera (edit user and paths before installing)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,8 +10,8 @@ WorkingDirectory=/home/pi/Robo2.0/PI
 ExecStart=/bin/bash /home/pi/Robo2.0/PI/start_robo.sh
 Restart=on-failure
 RestartSec=3
+KillMode=control-group
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
-# delete comment to automatically run everything at startup
-# WantedBy=multi-user.target
+WantedBy=multi-user.target

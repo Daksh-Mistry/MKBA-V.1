@@ -29,7 +29,7 @@ class Sensors:
             return
 
         if GPIO is None:
-            print("  Sensors offline: RPi.GPIO not available (off-Pi simulation mode).")
+            print("  Sensors unavailable: RPi.GPIO is not installed.")
             self.enabled = False
             return
 
@@ -45,10 +45,10 @@ class Sensors:
             print(f"  Sensors ready: Flame pins {pins.flame_array} | IR pins {pins.ir_array}")
         except Exception as e:
             self.enabled = False
-            print(f"  Sensors GPIO setup failed: {e} — falling back to simulation.")
+            print(f"  Sensors unavailable: GPIO setup failed: {e}")
 
     def read(self) -> dict:
-        """Read all sensor pins. Returns zeros on failure or if in simulation mode."""
+        """Read sensor pins; -1 means disabled or a setup/read failure."""
         if not self.enabled or not self._setup_ok or GPIO is None:
             return {
                 "flame_array": [-1] * len(self.pins.flame_array),
