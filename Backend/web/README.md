@@ -1,18 +1,7 @@
-# Laptop Client (Web UI)
+# Historical web client
 
-## Overview
-- Web-based UI connects to Pi WebSocket (`ws://robo.local:8765`) and MJPEG (`http://robo.local:8080/video.mjpg`).
-- Manual controls: WASD + arrows, Space (pump), Shift/Ctrl speed modifiers, Esc stop, M toggle manual/auto.
-- AI/chat + auto-mode hooks are stubbed; model/API selection via environment later.
+This folder preserves an older direct-Pi browser client. It is **not loaded by the normal launcher** and its old ports, video path, keyboard bindings and command formats are not the current API.
 
-## Quick start (dev)
-Open `web/index.html` in a modern browser. To override host/ports, use URL params:
-```
-file:///.../index.html?host=robo.local&wsPort=8765&videoPort=8080
-```
+Use the active [Frontend service](../../Frontend/README.md), which routes controls and metadata through the [Backend](../README.md) and reads Pi video directly using WebRTC. Start with [Getting started](../../Documents/GETTING_STARTED.md); the exact replacement contract is [API_BACKEND_FRONTEND.md](../../Documents/API_BACKEND_FRONTEND.md).
 
-## TODO
-- Add AI chat wiring (Gemini/OpenAI selectable).
-- Add auto-mode pipeline (YOLO on laptop) sending aim/move commands.
-- Add richer sensor visuals and logs.
-
+Do not open this historical UI to operate the current robot or run its direct control connection alongside the backend. It bypasses the current ownership, readiness, chat and auto-control architecture.

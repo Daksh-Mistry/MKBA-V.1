@@ -1,111 +1,135 @@
-# Robo frontend
+# Frontend: browser control room
 
-The control room is a small browser application with a separate Node.js server. It displays direct Pi video, robot state, movement controls, fire/smoke boxes and conversation. All robot commands and non-video data go through the backend. The frontend never receives the chat provider's API key.
+[Documentation index](../Documents/README.md) · [Getting started](../Documents/GETTING_STARTED.md) · [Operator guide](../Documents/OPERATING_GUIDE.md) · [Exact API](../Documents/API_BACKEND_FRONTEND.md)
 
-## Normal startup
+The frontend consists of one Node.js server and a browser application. The server handles local access, protected LAN login, static assets and the authenticated backend proxy. The browser shows direct Pi video, robot state, independent hardware availability, controls, detection boxes and conversation. Every control/metadata request goes through the backend. LLM API keys never enter browser JavaScript.
 
-Double-click the project's `START_ROBO.cmd`. It installs the runtime, creates matching settings, starts all three computer services, and opens the local UI with automatic sign-in. No copied token or API key is required. See the [project startup guide](../README.md).
+## Startup and configuration
 
-## Advanced standalone startup
+For normal use, start the repository launcher. It installs the runtime, creates matching credentials, starts Backend/ML/Frontend and opens the local console automatically. The printed/opened URL is authoritative: the launcher selects free ports, normally preferring frontend port 3001 or an existing saved port. No copied login token or LLM API key is required. See [Getting started](../Documents/GETTING_STARTED.md).
 
-1. Install Node.js 22 or later. This service uses Node built-ins and browser APIs; there are no npm dependencies to install.
-2. Copy `Frontend/.env.example` to `Frontend/.env`.
-3. Set `ROBO_UI_TOKEN` to a private token of at least 24 characters. This is the token you enter on the login page.
-4. Set `ROBO_SERVICE_TOKEN` to the **same** service token configured on the backend. Use a different token from the UI login token.
-5. Start ML and the backend using their README instructions. Configure the Pi video addresses on the backend, not in browser code.
-6. From the repository root run:
-
-   ```console
-   node Frontend/server.mjs
-   ```
-
-7. Open `http://localhost:3000` and enter your console token. Take control and explicitly Resume before sending motion commands. Calibration and Pi watchdog requirements are checked by the backend.
-
-Create random tokens locally with:
+For a prepared development environment, run from the repository root:
 
 ```console
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node Frontend/server.mjs
 ```
 
-The `.env` file is loaded relative to `server.mjs`, regardless of your working directory. Existing process environment values take precedence. The parser accepts simple `NAME=value`, quoted values and trailing comments after whitespace; it does not expand variables or implement shell syntax. Do not commit `.env`.
+Node.js 22 or later is required. This service uses Node built-ins; there are no npm dependencies or frontend build step. Standalone settings come from `Frontend/.env`, with existing process environment values taking precedence. The simple parser supports `NAME=value`, matching single/double quotes and whitespace-prefixed trailing comments; it does not expand variables or execute shell syntax.
 
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ROBO_UI_TOKEN` | Required | Console login token; at least 24 characters. |
-| `ROBO_SERVICE_TOKEN` | Required | Private backend bearer token; at least 24 characters. |
-| `ROBO_BACKEND_URL` | `http://127.0.0.1:8100` | Backend origin; HTTP/HTTPS, no URL credentials or path. |
+| Setting | Standalone default | Purpose |
+| --- | --- | --- |
 | `FRONTEND_HOST` | `127.0.0.1` | Bind interface. |
-| `FRONTEND_LOCAL_ACCESS` | `false` standalone; automatic launcher sets `true` | Same-origin local sign-in without a copied token; permitted only on a loopback bind. |
-| `FRONTEND_PORT` | `3000` | HTTP port. |
-| `FRONTEND_ORIGINS` | Empty | Additional exact browser origins, separated by commas. Localhost and 127.0.0.1 origins for the configured port are always allowed. |
+| `FRONTEND_PORT` | `3000` | TCP port, 1–65535. Normal launcher port selection can differ. |
+| `FRONTEND_LOCAL_ACCESS` | `false` | Only exact `true` enables token-free local login; the launcher enables it. Requires a loopback bind (`127.0.0.1`, `localhost`, or `::1`). |
+| `ROBO_UI_TOKEN` | Required | Private protected-LAN login token, at least 24 characters. Generated automatically for normal use. |
+| `ROBO_SERVICE_TOKEN` | Required | Backend bearer token, at least 24 characters, different from the UI token. Generated/matched automatically. |
+| `ROBO_BACKEND_URL` | `http://127.0.0.1:8100` | Backend HTTP(S) origin; no embedded credentials, path, query or fragment. `BACKEND_URL` is a fallback alias. |
+| `FRONTEND_ORIGINS` | Empty | Comma-separated additional exact HTTP(S) origins. `http://localhost:<port>` and `http://127.0.0.1:<port>` are always allowed. No trailing slash. |
 
-The default is for a browser on the same computer. For advanced LAN access, set `FRONTEND_LOCAL_ACCESS=false`, configure the bind interface and add the exact frontend origin (for example `http://192.168.1.10:3000`). LAN sign-in uses the console token. A non-localhost HTTP origin is not a secure browser context on all browsers; use a trusted HTTPS reverse proxy for remote use. Its public HTTPS origin must be allowed, and the Pi's direct WHEP endpoint must also be reachable over an appropriate HTTPS origin. The automatic launcher restores local-only settings; use standalone service startup for custom LAN configuration. This server does not provision certificates, remote tunnels or TURN.
+The normal launcher restores local-only access. A custom LAN deployment uses standalone startup, disables automatic local access, chooses a bind interface and adds the exact browser origin. IPv6 origins also need explicit allowance. Remote HTTPS/reverse proxy/MediaMTX/TURN setup is not provisioned by this server. See [Configuration](../Documents/CONFIGURATION.md) for deployment overrides.
 
-## What the UI does
+## Active files and call flow
 
-- Login creates an eight-hour, random, HttpOnly, SameSite=Strict session cookie. The token is cleared from the form and never stored in local/session storage.
-- Multiple viewers can see video/status. One operator at a time can claim control. Connecting or reconnecting never automatically claims or resumes control.
-- Hold the drive arrows or **W/A/S/D** to move. The UI refreshes at 10 Hz. Release, pointer cancellation, window blur, hidden tab, ownership loss, mode change or disconnection clears held inputs. The backend and Pi enforce independent motion timeouts.
-- Face arrows request a relative 5° movement per tap. Space/Enter works on focused drive buttons; letter shortcuts do not intercept text entry.
-- **Stop robot** or **Escape** requests stop regardless of control ownership. It also stops local drive refresh. The backend/Pi perform motor stop, pump off and face centering. An offline browser cannot send stop; independent server watchdogs cover that case.
-- Pump burst requests 800 ms; the backend applies its own hard limit. Turn pump off remains available to signed-in viewers.
-- Select a model while stopped, then Start detection. Selecting the dropdown alone does not load a model. Auto decisions are performed by the backend; mode selection and Resume are separate.
-- Chat sends text through the backend. Gesture and voice outcomes are reported separately from conversation. A pending voice label updates when the asynchronous Pi acceptance/error arrives; acceptance is not proof of audible playback. Voice uses the Pi speaker through the backend, not browser speech synthesis. The chat model is not an autonomous robot manager.
-- Pi simulation is prominently marked. Connected, ready and fresh state are distinguished from a physical execution acknowledgement.
+| File | Responsibility |
+| --- | --- |
+| [`server.mjs`](server.mjs) | Loads settings, validates Host/Origin, creates/revokes login cookies, serves an explicit static-file list, forwards allowlisted HTTP routes and proxies authenticated WebSocket upgrades. |
+| [`public/index.html`](public/index.html) | Console/login structure, accessible buttons/forms, live status areas and diagnostic panels. |
+| [`public/style.css`](public/style.css) | Responsive layout, focus/disabled states, simulation/hardware messages and mobile Stop button. |
+| [`public/app.js`](public/app.js) | Local login/renewal, backend session/reconnect, state rendering, independent control gating, chat, model selection, sensor labels, activity log and canvas overlay. |
+| [`public/control.js`](public/control.js) | `HoldDrive` owns press/refresh/release behavior; `controlAvailability` combines session state and backend readiness; geometry helpers validate boxes and calculate letterboxing. |
+| [`public/video.js`](public/video.js) | `PiVideo` creates/cleans a receive-only direct WHEP connection, retries failures and rejects stale negotiation completions. |
+| [`package.json`](package.json) | Node version requirement and start/test convenience commands. |
+| [`tests/frontend.test.mjs`](tests/frontend.test.mjs) | Login, origin, proxy/session revocation, WebSocket forwarding, hold-to-drive and overlay geometry tests. |
+| [`tests/readiness.test.mjs`](tests/readiness.test.mjs) | Healthy controls remain available independently; stale/viewer/hidden states cannot actuate; auto Resume requires readiness. |
+
+```text
+Page load → GET /session → POST /login/local if needed → session cookie
+  → same-origin /api/v1/ws → Frontend bearer proxy → Backend
+hello/state → controls and diagnostics
+video/sources → PiVideo → direct Pi WHEP/WebRTC
+ML detections → Backend → same-origin WebSocket → canvas overlay
+Chat form → Backend → ML → chat.reply → text/gesture/voice status
+```
+
+The Node server is one process with no application worker threads. The browser uses its normal networking, rendering and WebRTC internals. No neural model runs in this frontend.
+
+## Login, ownership and reconnect
+
+Local startup checks `/session`, then attempts `/login/local` without a token. The server grants that route only with local access enabled, a loopback peer and an exact permitted Origin/Host. Other deployments retain the token form. **Open on this computer** allows a local user to return after signing out. Expired local sessions can be renewed on reconnect without copying a secret.
+
+Both login paths create a random eight-hour `robo_session` cookie with `HttpOnly`, `SameSite=Strict` and `Path=/`. It gains `Secure` for an allowed HTTPS origin. The cookie is not a backend control-session ID. Sign-out and expiry revoke associated proxy sockets; the backend then stops an owning operator. The frontend does not store tokens in browser storage.
+
+Every backend WebSocket connection receives its own session ID. Reconnect clears pending requests and starts a fresh sequence. It never replays a gesture, claims control or resumes automatically. Multiple viewers can watch; one operator may claim control. The model dropdown is disabled for viewers or while the robot is resumed; this does not mean an installed model is missing. An individual option is marked missing only when ML reports `artifact_available:false`.
+
+## Controls and visible state
+
+| UI action | Request and behavior |
+| --- | --- |
+| Take control / Release / Resume | Separate ownership/stop-latch operations. Resume requires Pi readiness and, in auto, all auto prerequisites. |
+| Drive arrows or W/A/S/D | Hold to refresh a semantic direction at 10 Hz. Default speed 20%; slider range 10–60%. Space/Enter can operate a focused drive button. |
+| Release/cancel/blur/hidden page | Stop local drive refresh and send drive stop. Ownership loss, mode change and connection loss also clear held controls. Letter shortcuts do not intercept text input. |
+| Face arrows | One relative 5° request per tap. Displayed angles have one decimal; API precision is retained. |
+| Pump burst | Request an 800 ms burst. Backend enforces cooldown and maximum duration. |
+| Turn pump off | Available to the owner with a fresh Pi and available pump. It does not by itself leave auto or latch global stop. |
+| Stop robot / Escape | Any connected viewer can request whole-robot stop. Pi stops motors/pump/speech and centers available servos. If the browser cannot deliver, independent backend/Pi deadlines still apply. |
+| Manual / Auto | Stops outputs, changes mode; Auto can start vision. Resume remains a separate action. |
+| Confirm camera / nozzle check | Owner-only while stopped with available servos/pump. Records the user's physical operating check; does not measure or automatically calibrate alignment. |
+| Start / Pause detection | Sends selected detector ID or stops vision. Selecting the dropdown alone does not load a model. |
+| Speak on Pi speaker | Opt-in per chat request. Uses the backend/Pi speaker path, not browser speech synthesis. |
+| Stop voice | Any connected viewer can request speech cancellation independently. |
+| Shut down Pi script | Owner-only confirmation; exits the Pi script after stopping outputs, not the OS. |
+
+Motor, servo and pump controls follow separate backend readiness values. Missing motors/sensors do not disable a healthy face or pump. The UI shows per-component failure reasons and unknown values instead of substituting successful hardware states. IR inputs without observed signal changes show **Input unverified**; digital flame signals are not a claim that a flame sensor is physically attached. See [Hardware](../Documents/HARDWARE.md).
+
+The connection badge considers Pi status fresh below 1.5 s, but actuator controls use the stricter 1 s limit and backend readiness. `stopped:false` means the backend is resumed, not that motors are moving. `sent_to_pi` is a send result, not measured motion. Simulation is explicitly labelled.
+
+## Conversation
+
+Text chat works without a provider key using local basic responses. A configured provider supplies richer conversation; no model-generated free text becomes code or an arbitrary motor command. Supported one-step gestures pass through independent backend validation. See [Operator guide](../Documents/OPERATING_GUIDE.md) for phrases and [ML API](../Documents/API_ML.md) for the provider/adapter boundary.
+
+Conversation, gesture and voice outcomes are displayed separately. A voice request first shows pending, then the backend reports Pi acceptance/cancellation/unavailability. Accepted does not certify audible playback. One UI conversation is pending at a time; a 60 s browser timeout allows another attempt. Pending requests are cleared on disconnect and never replayed. The browser retains up to 100 displayed chat messages and 30 activity entries in memory; there is no persistent conversation archive.
+
+The frontend has no microphone input, speech recognition or local LLM. Its camera/microphone browser permissions are disabled because video comes from the Pi and chat input is text.
 
 ## Direct video and overlays
 
-`GET /api/v1/video/sources` supplies the Pi's WHEP and standalone viewer URLs. `video.js` creates a receive-only WebRTC connection, waits for ICE candidates, sends the SDP offer directly to MediaMTX and applies its answer. It reconnects after camera failures. The backend and frontend server never proxy these video frames. Open camera opens the Pi's own viewer for troubleshooting.
+`GET /api/v1/video/sources` provides WHEP/viewer URLs and stream identity. `PiVideo` creates a receive-only video transceiver, gathers ICE candidates, posts the complete SDP offer **directly to MediaMTX**, and installs the SDP answer. No video bytes pass through the backend or Node proxy. **Open camera** opens MediaMTX's standalone viewer.
 
-The video connection stays running if backend/ML metadata drops. Signing out or leaving the page closes it. MediaMTX must allow the frontend browser origin for signaling; the Pi's WebRTC media port (normally UDP 8189) must be reachable. This first reader supports full SDP exchange with host ICE candidates; optional `ice_servers` from video configuration can supply ICE servers. Advanced remote traversal/authentication needs corresponding MediaMTX and HTTPS configuration.
+The first ICE gathering limit is 5 s, signaling has a 12 s deadline, and failure retries occur after 5 s. The reader sends best-effort `DELETE` for a same-origin WHEP session resource when closing. Backend metadata disconnection does not itself stop a working video stream. Sign-out or leaving the page closes it. Optional future `ice_servers` metadata is supported by the reader, but the current backend does not emit it or configure TURN automatically.
 
-Canvas overlays use normalized boxes and the source image aspect ratio, accounting for the player's `object-fit: contain` letterboxing. Boxes expire after 500 ms, including ML-reported frame age. This timing is approximate: direct WebRTC playback and the ML RTSP decoder have independent buffering. There is no claim of exact source exposure time, impact detection or physical distance. Future aim/impact data can use the separate metadata layer; precise frame alignment requires shared source timing first.
+Canvas boxes use normalized `[x1,y1,x2,y2]` coordinates, the detection image's aspect ratio and the video's contain/letterbox layout. A box is hidden when decoder-age plus local receipt age reaches 500 ms or video is disconnected. This is approximate alignment: browser WebRTC and ML RTSP buffering differ, and timestamps are based on local decoder receipt, not camera exposure. There is no tracking, distance, impact prediction or verified water-hit overlay. Shared source timing and new metadata would be needed for those features.
 
-Primary protocol reference: [MediaMTX WebRTC reading](https://mediamtx.org/docs/read/webrtc).
+The normal Pi video ports are TCP 8889 for WHEP signaling and UDP 8189 for media. The browser must reach those endpoints directly. See [Pi API](../Documents/API_PI.md), [Architecture](../Documents/ARCHITECTURE.md) and [Troubleshooting](../Documents/TESTING_AND_TROUBLESHOOTING.md).
 
-## Files and responsibilities
+## Server interface and replacement
 
-| File | Responsibility |
-|---|---|
-| `server.mjs` | Environment loading, login sessions, origin/host validation, static files, HTTP proxy and authenticated WebSocket upgrade proxy. |
-| `public/index.html` | Accessible console structure and login page. |
-| `public/style.css` | Responsive appearance, disabled/focus states and mobile fixed Stop button. |
-| `public/app.js` | Backend session/state, controls, chat, model selection, sensors, overlay drawing and reconnect behavior. |
-| `public/control.js` | Hold/release drive lifecycle and reusable box geometry checks. |
-| `public/video.js` | Direct Pi WHEP playback and connection cleanup. |
-| `tests/frontend.test.mjs` | Login/proxy security, WebSocket forwarding/revocation, drive release and overlay geometry checks. |
+The server exposes five static paths (`/`, `/app.js`, `/control.js`, `/video.js`, `/style.css`), local/protected login, session/logout, five allowlisted backend HTTP reads and the backend WebSocket proxy. It does not serve arbitrary workspace files. Host/Origin validation applies before routing; query parameters are rejected.
 
-## API contract
+The proxy forwards its own service bearer token and removes browser cookies, Authorization and Origin from upstream requests. Each login cookie supports at most four proxy WebSockets. Backend capacity is separately limited to 32 connections. HTTP proxy bodies are capped at 64 KiB; upstream timeout is 15 s. Token login permits ten attempts per remote address per minute; the local endpoint is a separate loopback-only path. Exact routes, errors, schemas and timing are in [API_BACKEND_FRONTEND.md](../Documents/API_BACKEND_FRONTEND.md).
 
-The proxy permits these backend HTTP paths: `/api/v1/health`, `/api/v1/robot`, `/api/v1/video/sources`, `/api/v1/ml/models`, `/api/v1/auto/config`. Only GET is allowed except PUT for auto configuration. JSON bodies are limited to 64 KiB. The current UI uses the first four; changing auto calibration/settings remains a backend configuration operation.
+Although the proxy currently permits `PUT /api/v1/auto/config`, the backend has no PUT handler, so it returns 405. Runtime auto-limit editing is not implemented. The operating check uses its explicit WebSocket command instead.
 
-The browser connects to same-origin `/api/v1/ws`. Each outgoing JSON message has a fresh `request_id` and a monotonically increasing `seq`; a reconnect starts a fresh backend session and clears pending work. UI messages are `heartbeat`, `control`, `drive`, `servo`, `pump`, `mode`, `vision`, `system`, `chat` and `speech`. Incoming messages are `hello`, `state`, `detections`, `command_result`, `chat.reply`, `event`, `error`, and heartbeat acknowledgements.
+A replacement UI must keep the authenticated proxy boundary, fresh request IDs and per-connection sequence, heartbeat, hold/release semantics, explicit ownership/resume, direct video separation and separate movement/voice outcomes. It must treat `null`, stale metadata and readiness reasons explicitly. See [Replacement compatibility](../Documents/API_BACKEND_FRONTEND.md#replacement-compatibility).
 
-The proxy forwards only its own service bearer token. Browser cookies, browser Authorization and Origin headers are not forwarded to the backend. Login/unsafe requests and WebSocket handshakes require the correct Origin; requests also require an allowlisted Host. API access requires a valid session. Logout and cookie expiry revoke active proxy WebSockets. Cookies have the Secure attribute when the configured browser origin is HTTPS. The login endpoint limits failed/valid attempts together to ten per remote address per minute. API/provider secrets are never logged.
+## Test and troubleshoot
 
-## Verify and troubleshoot
-
-From `Frontend` run:
+From `Frontend`:
 
 ```console
 node --test tests/*.test.mjs
 ```
 
-No real Pi or API key is required for these tests. Tests use temporary local HTTP/WebSocket servers; they do not command hardware.
+Tests use temporary loopback services and issue no physical robot commands. Full-stack and physical test scopes are recorded in [Testing and troubleshooting](../Documents/TESTING_AND_TROUBLESHOOTING.md).
 
-| Symptom | Check |
-|---|---|
-| Frontend refuses to start | Required token length, different UI/service tokens, valid port and backend origin. |
-| Login rejected | Use the frontend UI token, not an API key; check exact Origin/Host and the one-minute attempt limit. |
-| Backend offline | Backend process/address and matching `ROBO_SERVICE_TOKEN`; backend logs. |
-| Pi offline | Pi process, address, network and backend/Pi service-token configuration. |
-| Cannot Resume or move | Take control, inspect calibration/watchdog/telemetry state and the returned backend message. |
-| Video offline but Pi connected | Pi camera/MediaMTX is separate; inspect WHEP URL, MediaMTX logs, CORS, HTTPS/ICE connectivity. |
-| Video works, boxes absent | Start detection; inspect ML readiness, checkpoint availability and direct ML RTSP access. Boxes deliberately expire when stale. |
-| Chat unavailable | ML chat model/base URL/API key, backend-to-ML token and connection. |
-| Voice unavailable | Backend speech setting, Pi speech capability, speaker and eSpeak installation. |
-| Another operator owns control | Release from that session or wait for its heartbeat timeout. Viewing does not take ownership. |
+| Symptom | First useful check |
+| --- | --- |
+| Local login unavailable | Start through the normal launcher; check loopback bind and exact Origin/Host. |
+| Backend offline | Backend process, selected port and shared service token. |
+| Pi offline | Pi script/network/discovery. Pi 2.3 needs no control token. |
+| Resume/control disabled | Ownership, stop state and the specific readiness reason. A connection alone does not establish hardware readiness. |
+| Video offline but Pi connected | Camera/MediaMTX is separate; check direct WHEP and UDP reachability. |
+| Video works but boxes do not | Owner starts detection; check ML status, installed checkpoint and ML's direct RTSP path. |
+| Keyless chat unavailable | ML service connectivity/shared token. An API key is not needed for basic responses. |
+| Voice unavailable | Pi speech capability/output, owner/resume state and per-message Speak selection. |
 
-The service adds one Node process and no application worker threads. Browser/network libraries may use their own internal threads. Physical video latency, sensors, motor polarity, face direction, pump/nozzle alignment and speaker output require checks on the actual Pi.
+The old [`Backend/web/`](../Backend/web/README.md) client is historical and unsupported by the normal launcher. This folder is the active frontend.
