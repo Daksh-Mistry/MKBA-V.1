@@ -16,8 +16,9 @@ class MLClient:
         parsed = urlsplit(settings.ml_url)
         self.ws_url = urlunsplit(('wss' if parsed.scheme == 'https' else 'ws', parsed.netloc,
                                  parsed.path.rstrip('/') + '/v1/inference', '', ''))
+        headers = {'Authorization': f'Bearer {settings.ml_token}'} if settings.ml_token else {}
         self.http = httpx.AsyncClient(base_url=settings.ml_url,
-                                     headers={'Authorization': f'Bearer {settings.ml_token}'},
+                                     headers=headers,
                                      timeout=20, trust_env=False)
         self.ws = None
         self.task = None
@@ -31,12 +32,9 @@ class MLClient:
         delay = 0.5
         while True:
             try:
-                if not self.settings.ml_token:
-                    await self.callback({'type': 'connection', 'connected': False, 'code': 'ml_token_missing'})
-                    await asyncio.sleep(5)
-                    continue
+                extra_headers = {'Authorization': f'Bearer {self.settings.ml_token}'} if self.settings.ml_token else {}
                 async with websockets.connect(
-                    self.ws_url, extra_headers={'Authorization': f'Bearer {self.settings.ml_token}'},
+                    self.ws_url, extra_headers=extra_headers,
                     open_timeout=3, close_timeout=1, ping_interval=10, ping_timeout=3,
                     max_size=131072, max_queue=2,
                 ) as ws:

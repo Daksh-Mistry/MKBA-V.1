@@ -20,21 +20,21 @@ class AutoPolicyTests(unittest.TestCase):
         action = None
         for i in range(3):
             action = policy.step(self.result([0.7, 0.7, 0.9, 0.9]), float(i), {'pan': 90, 'tilt': 90})
-        self.assertEqual(action, {'kind': 'servo', 'pan': -3, 'tilt': 3})
+        self.assertEqual(action, {'kind': 'servo', 'direction': 'right', 'degrees': 3, 'pan': 3, 'tilt': 3})
 
-    def test_three_burst_limit_and_cooldown(self):
+    def test_burst_and_cooldown_until_cleared(self):
         policy = AutoPolicy(Settings())
         actions = []
+        # Simulate fire staying present for 20 seconds
         for i in range(150):
             action = policy.step(self.result(), i * 0.2, {'pan': 90, 'tilt': 90})
             if action:
                 actions.append((i * 0.2, action))
-                if action['kind'] == 'complete':
-                    break
         bursts = [when for when, action in actions if action['kind'] == 'pump']
-        self.assertEqual(len(bursts), 3)
-        self.assertTrue(all(b - a >= 5.8 for a, b in zip(bursts, bursts[1:])))
-        self.assertEqual(actions[-1][1]['kind'], 'complete')
+        # Multiple bursts occur because fire remains present
+        self.assertGreaterEqual(len(bursts), 2)
+        # Verify 3s spray + 2s cooldown = at least 5.0s between pump activations
+        self.assertTrue(all(b - a >= 4.9 for a, b in zip(bursts, bursts[1:])))
 
     def test_clear_frames_after_spray_end_cycle(self):
         policy = AutoPolicy(Settings())
@@ -45,8 +45,9 @@ class AutoPolicyTests(unittest.TestCase):
 
     def test_mechanical_aim_limit_ends_cycle(self):
         policy = AutoPolicy(Settings())
+        # Fire is to the left (dx < -0.08, pan = -3), but pan is already at lower limit 30
         for i in range(3):
-            action = policy.step(self.result([0.1, 0.4, 0.2, 0.6]), float(i), {'pan': 150, 'tilt': 90})
+            action = policy.step(self.result([0.1, 0.4, 0.2, 0.6]), float(i), {'pan': 30, 'tilt': 90})
         self.assertEqual(action['kind'], 'complete')
         self.assertEqual(policy.phase, 'blocked')
 

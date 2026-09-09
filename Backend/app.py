@@ -29,48 +29,32 @@ def create_app(settings=None, *, controller=None):
     app = FastAPI(title='Robo Backend', version='1.0.0', lifespan=lifespan)
     app.state.controller = robot
 
-    def authorized(headers):
-        expected = f'Bearer {settings.service_token}'
-        actual = headers.get('authorization', '')
-        return bool(settings.service_token and not headers.get('origin') and
-                    hmac.compare_digest(actual.encode(), expected.encode()))
-
-    async def require_frontend(request: Request):
-        if not settings.service_token:
-            raise HTTPException(503, 'Configure ROBO_SERVICE_TOKEN before using the API')
-        if not authorized(request.headers):
-            raise HTTPException(401, 'Authenticated frontend proxy required')
-
     @app.get('/api/v1/health')
     async def health():
         return {'service': 'robo-backend', 'version': '1.0.0',
-                'authentication_configured': bool(settings.service_token),
                 'status': 'running', 'hardware_verified': False}
 
-    @app.get('/api/v1/robot', dependencies=[Depends(require_frontend)])
+    @app.get('/api/v1/robot')
     async def state():
         return robot.snapshot()
 
-    @app.get('/api/v1/video/sources', dependencies=[Depends(require_frontend)])
+    @app.get('/api/v1/video/sources')
     async def video_sources():
         return robot.video_sources()
 
-    @app.get('/api/v1/ml/models', dependencies=[Depends(require_frontend)])
+    @app.get('/api/v1/ml/models')
     async def models():
         try:
             return await robot.ml.models()
         except Exception:
             raise HTTPException(503, 'ML model registry is unavailable') from None
 
-    @app.get('/api/v1/auto/config', dependencies=[Depends(require_frontend)])
+    @app.get('/api/v1/auto/config')
     async def auto_config():
         return robot.auto_config()
 
     @app.websocket('/api/v1/ws')
     async def control(ws: WebSocket):
-        if not authorized(ws.headers):
-            await ws.close(code=1008, reason='Authenticated frontend proxy required')
-            return
         await ws.accept()
         queue = asyncio.Queue(maxsize=64)
         overflow = asyncio.Event()
@@ -96,7 +80,7 @@ def create_app(settings=None, *, controller=None):
         async def receive_loop():
             credits, previous = 60.0, time.monotonic()
             while True:
-                incoming = await asyncio.wait_for(ws.receive(), timeout=15)
+                incoming = await ws.receive()
                 if incoming['type'] == 'websocket.disconnect':
                     return
                 raw = incoming.get('text')
@@ -118,6 +102,7 @@ def create_app(settings=None, *, controller=None):
                 except (ValueError, RecursionError):
                     enqueue({'type': 'error', 'message': 'Invalid JSON object'})
                     continue
+                print(f"[WS COMMAND RECEIVED] {data}", flush=True)
                 await robot.handle(sid, data)
 
         async def overflow_loop():

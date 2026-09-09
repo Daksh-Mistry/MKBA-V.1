@@ -36,12 +36,12 @@ class Settings:
     speech_enabled: bool = True
     owner_timeout: float = 3.0
     telemetry_timeout: float = 1.0
-    drive_input_timeout: float = 0.4
+    drive_input_timeout: float = 30.0
     detection_timeout: float = 0.75
     maximum_speed: float = 0.6
     auto_confidence: float = 0.65
-    auto_spray_seconds: float = 0.8
-    auto_cooldown_seconds: float = 5.0
+    auto_spray_seconds: float = 3.0
+    auto_cooldown_seconds: float = 2.0
 
     @classmethod
     def from_env(cls):

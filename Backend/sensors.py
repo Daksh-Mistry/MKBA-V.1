@@ -54,18 +54,30 @@ class SensorProcessor:
 
     def snapshot(self, now, timeout=1.0):
         fresh = self.last_at is not None and now - self.last_at <= timeout
-        ir = [{'position': index, 'blocked': value if fresh else None,
-               'valid': fresh and value is not None,
-               'signal_observed': self.signal_observed[index],
-               'motion_usable': fresh and value is not None and (
-                   not self.require_signal_evidence or self.signal_observed[index])}
-              for index, value in enumerate(self.ir)]
-        flame = [{'position': index, 'detected': bool(value) if fresh and value != -1 else None,
-                  'valid': fresh and value != -1} for index, value in enumerate(self.raw['flame_array'])]
-        return {'raw': {key: list(values) for key, values in self.raw.items()},
-                'ir': ir, 'flame': flame, 'fresh': fresh,
-                'signal_evidence_required': self.require_signal_evidence,
-                'age_ms': None if self.last_at is None else round((now - self.last_at) * 1000)}
+        ir_res = []
+        for val in self.raw.get('ir_array', [-1] * 4):
+            if not fresh or val == -1:
+                ir_res.append(-1)
+            elif val == self.blocked_value:
+                ir_res.append(1)
+            else:
+                ir_res.append(0)
+
+        flame_res = []
+        for val in self.raw.get('flame_array', [-1] * 4):
+            if not fresh or val == -1:
+                flame_res.append(-1)
+            elif val == 1:
+                flame_res.append(1)
+            else:
+                flame_res.append(0)
+
+        return {
+            'ir': ir_res,
+            'flame': flame_res,
+            'fresh': fresh,
+            'age_ms': None if self.last_at is None else round((now - self.last_at) * 1000)
+        }
 
     def clear(self, now, timeout=1.0):
         return (self.last_at is not None and now - self.last_at <= timeout and all(v is False for v in self.ir)

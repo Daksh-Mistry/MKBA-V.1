@@ -6,3 +6,267 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 .operating-check{margin:12px 24px;color:var(--muted);font-size:11px}.operating-check summary{cursor:pointer}.operating-check pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}.operating-check p{margin:10px 0}
 .hardware-issue{color:var(--amber);overflow-wrap:anywhere}
+
+/* Interactive button effects & consistency */
+button {
+  transition: all 0.12s ease-in-out;
+  user-select: none;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 0 10px rgba(196, 223, 145, 0.2);
+}
+button:active:not(:disabled) {
+  transform: scale(0.96) translateY(1px);
+}
+
+/* Direction pads (Drive & Face/Servo) */
+.direction-pad button {
+  transition: background 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease, color 0.1s ease;
+}
+.direction-pad button:hover:not(:disabled) {
+  filter: brightness(1.25);
+  border-color: var(--accent);
+}
+.direction-pad button.is-held,
+.direction-pad button:active:not(:disabled) {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+  transform: scale(0.92);
+  box-shadow: 0 0 16px rgba(196, 223, 145, 0.6) !important;
+}
+
+/* Single Water Pump Toggle Button */
+.pump-toggle-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  min-height: 44px;
+  font-weight: 700;
+  border-radius: 9px;
+  transition: all 0.2s ease;
+}
+.pump-glow-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #627267;
+  transition: all 0.2s ease;
+}
+.pump-toggle-btn.is-active,
+.pump-toggle-btn[aria-pressed="true"] {
+  background: #2ea879 !important;
+  color: #0c1c15 !important;
+  border-color: #6ee7b7 !important;
+  box-shadow: 0 0 20px rgba(46, 168, 121, 0.6) !important;
+}
+.pump-toggle-btn.is-active .pump-glow-dot,
+.pump-toggle-btn[aria-pressed="true"] .pump-glow-dot {
+  background: #ffffff;
+  box-shadow: 0 0 8px #ffffff;
+}
+
+/* Switch button styling for Controls Enabled / Disabled */
+.session-controls {
+  display: flex;
+  gap: 10px;
+  padding: 0 24px;
+}
+.switch-btn {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #19201e;
+  color: var(--muted);
+  transition: all 0.2s ease;
+}
+.switch-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+#enable.is-active,
+#enable[aria-pressed="true"] {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+  border-color: var(--accent) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 16px rgba(196, 223, 145, 0.45) !important;
+}
+#release.is-active,
+#release[aria-pressed="true"] {
+  background: #c94f3d !important;
+  color: #ffffff !important;
+  border-color: #ee8978 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 16px rgba(201, 79, 61, 0.5) !important;
+}
+
+/* Segmented mode buttons (Manual / Auto) */
+.segmented {
+  display: flex;
+  margin: 17px 24px 22px;
+  border-radius: 9px;
+  background: #101713;
+  padding: 4px;
+  border: 1px solid var(--line);
+  gap: 4px;
+}
+.segmented button {
+  flex: 1;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 6px 12px;
+  font-weight: 600;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: all 0.18s ease;
+}
+.segmented button.is-active,
+.segmented button[aria-pressed="true"] {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 14px rgba(196, 223, 145, 0.45) !important;
+}
+.segmented button:not(.is-active):not([aria-pressed="true"]) {
+  background: transparent !important;
+  color: var(--muted) !important;
+  box-shadow: none !important;
+}
+
+/* Steady, calm video stage & placeholder */
+.video-stage {
+  position: relative;
+  aspect-ratio: 16/9;
+  margin: 0 14px;
+  background: #0d1210;
+  border: 1px solid #222d26;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.video-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 24px;
+  text-align: center;
+  background: #121915;
+}
+.camera-symbol {
+  font-size: 36px;
+  color: #4a6352;
+  margin-bottom: 12px;
+  line-height: 1;
+}
+.video-placeholder strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: #cbdad0;
+}
+.video-placeholder p {
+  font-size: 12px;
+  color: #7b8e81;
+  margin: 6px 0 0;
+  max-width: 320px;
+}
+
+/* Stop button */
+.stop-button:hover:not(:disabled) {
+  background: #e0432c !important;
+  box-shadow: 0 0 20px rgba(224, 67, 44, 0.6) !important;
+}
+.stop-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* Live Activity Log Inspection Styling */
+.activity-log {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.log-item {
+  background: #151d19;
+  border: 1px solid #27342d;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  transition: background 0.15s;
+}
+.log-item:hover {
+  background: #19231e;
+  border-color: #3b4d43;
+}
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.log-time {
+  color: #7d8f84;
+  font-size: 10px;
+}
+.log-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.tag-out {
+  background: rgba(196, 223, 145, 0.18);
+  color: var(--accent);
+  border: 1px solid rgba(196, 223, 145, 0.4);
+}
+.tag-in {
+  background: rgba(100, 181, 246, 0.18);
+  color: #64b5f6;
+  border: 1px solid rgba(100, 181, 246, 0.4);
+}
+.tag-offline {
+  background: rgba(239, 188, 117, 0.18);
+  color: var(--amber);
+  border: 1px solid rgba(239, 188, 117, 0.4);
+}
+.tag-info {
+  background: rgba(165, 178, 170, 0.18);
+  color: var(--muted);
+}
+.log-type {
+  color: var(--text);
+  font-weight: 600;
+}
+.log-error {
+  color: var(--red);
+  font-weight: 600;
+}
+.log-json {
+  margin: 5px 0 0;
+  padding: 5px 8px;
+  background: #0d1310;
+  border-radius: 6px;
+  color: #a8d5b5;
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border: 1px solid #1e2a22;
+}

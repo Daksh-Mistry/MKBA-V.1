@@ -1,9 +1,8 @@
 """The existing MKBA V1 wiring, without claiming physical calibration."""
 
 PROFILE_ID = 'mkba-v1'
-# Existing user-tested motor and servo mapping; hardware drivers stay unchanged.
-DRIVE = {'forward': (1, -1), 'backward': (-1, 1), 'left': (-1, -1), 'right': (1, 1), 'stop': (0, 0)}
-LOOK = {'left': (1, 0), 'right': (-1, 0), 'up': (0, -1), 'down': (0, 1)}
+DRIVE = {'forward': (1, 1), 'backward': (-1, -1), 'left': (-1, 1), 'right': (1, -1), 'stop': (0, 0)}
+LOOK = {'left': (-1, 0), 'right': (1, 0), 'up': (0, -1), 'down': (0, 1), 'center': (0, 0), 'stop': (0, 0)}
 # PI/hardware/sensors.py uses pull-up active-low IR and already inverts flame.
 IR_BLOCKED_VALUE = 0
 

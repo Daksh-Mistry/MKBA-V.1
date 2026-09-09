@@ -82,6 +82,13 @@ class RobotServerManager:
                 self._hardware_failure(exc)
             raise
 
+    def center_servos(self):
+        if self.shutting_down:
+            raise RuntimeError("server is shutting down")
+        self.require_control_lease()
+        if self.hardware.parts["servos"].available:
+            self.hardware.call("servos", "center")
+
     def telemetry(self):
         before = {name for name, part in self.hardware.parts.items() if part.available}
         angles, pump = self.hardware.servo_angles(), self.hardware.pump_state()

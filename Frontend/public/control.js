@@ -1,66 +1,160 @@
-/** Holding a direction refreshes a short backend lease; releasing always sends zero. */
+/** Drive control: sends motion command ONCE on start, and stop command ONCE on release. */
 export class HoldDrive {
-  constructor({ send, canDrive, speed, onChange = () => {}, interval = setInterval, cancel = clearInterval }) {
-    Object.assign(this, { send, canDrive, speed, onChange, interval, cancel });
+  constructor({ send, canDrive, speed, onChange = () => {} }) {
+    Object.assign(this, { send, canDrive, speed, onChange });
     this.direction = null;
-    this.timer = null;
   }
   start(direction) {
     if (!['forward', 'backward', 'left', 'right'].includes(direction) || !this.canDrive()) return false;
     if (direction === this.direction) return true;
-    this.stop();
     this.direction = direction;
     this.onChange(direction);
     this.send({ type: 'drive', direction, speed: this.speed() });
-    this.timer = this.interval(() => {
-      if (!this.canDrive()) return this.stop();
-      this.send({ type: 'drive', direction: this.direction, speed: this.speed() });
-    }, 100);
     return true;
   }
   stop() {
-    if (this.timer !== null) this.cancel(this.timer);
-    this.timer = null;
-    const wasMoving = this.direction !== null;
-    this.direction = null;
-    this.onChange(null);
-    if (wasMoving) this.send({ type: 'drive', direction: 'stop', speed: 0 });
+    if (this.direction !== null) {
+      this.direction = null;
+      this.onChange(null);
+      this.send({ type: 'drive', direction: 'stop', speed: 0 });
+    }
   }
 }
 
-/** Keyboard movement always needs a fresh press; cancelled holds never replay. */
-export class DriveKeys {
-  constructor({ drive, canDrive, onStop, onBlocked = () => {} }) {
-    Object.assign(this, { drive, canDrive, onStop, onBlocked });
-    this.heldKey = null;
+/** Servo face control: sends 5° step immediately, repeats at 2 Hz while held, and stop on release. */
+export class HoldServo {
+  constructor({ send, canDrive, onChange = () => {} }) {
+    Object.assign(this, { send, canDrive, onChange });
+    this.direction = null;
+    this.repeatInterval = null;
+  }
+  start(direction) {
+    if (direction === 'center') {
+      if (!this.canDrive()) return false;
+      this.send({ type: 'servo', direction: 'center' });
+      return true;
+    }
+    if (!['up', 'down', 'left', 'right'].includes(direction) || !this.canDrive()) return false;
+    if (direction === this.direction) return true;
+    this.stop();
+    this.direction = direction;
+    this.onChange(direction);
+    // Send 1st step immediately (5 degrees)
+    this.send({ type: 'servo', direction, degrees: 5 });
+    // When kept pressed, send at 2 messages per second (every 500ms)
+    this.repeatInterval = setInterval(() => {
+      if (this.direction) {
+        this.send({ type: 'servo', direction: this.direction, degrees: 5 });
+      }
+    }, 500);
+    return true;
+  }
+  stop() {
+    if (this.repeatInterval) {
+      clearInterval(this.repeatInterval);
+      this.repeatInterval = null;
+    }
+    if (this.direction !== null) {
+      this.direction = null;
+      this.onChange(null);
+      this.send({ type: 'servo', direction: 'stop' });
+    }
+  }
+}
+
+/** Keyboard movement: WASD holds to drive, Arrow keys hold to step servo at 2 Hz, stop on release. */
+export class KeyboardController {
+  constructor({ drive, servo, canDrive, onStop, onBlocked = () => {} }) {
+    Object.assign(this, { drive, servo, canDrive, onStop, onBlocked });
+    this.heldDriveKeys = new Set();
+    this.heldServoKeys = new Set();
+  }
+  _servoMap(event) {
+    const map = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      KeyC: 'center',
+      c: 'center',
+      C: 'center',
+    };
+    return map[event.code] || map[event.key];
+  }
+  _driveMap(event) {
+    const map = {
+      KeyW: 'forward', w: 'forward', W: 'forward',
+      KeyS: 'backward', s: 'backward', S: 'backward',
+      KeyA: 'left', a: 'left', A: 'left',
+      KeyD: 'right', d: 'right', D: 'right',
+    };
+    return map[event.code] || map[event.key];
   }
   down(event) {
     if (event.code === 'Escape') {
       event.preventDefault(); this.reset(); this.onStop(); return;
     }
-    const direction = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'backward', ArrowDown: 'backward',
-      KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' }[event.code];
-    if (!direction || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
     const field = event.target?.closest?.('input,textarea,select,[contenteditable=true]');
-    // WASD still works after adjusting speed; arrows retain the slider's normal behavior.
-    if (field && (field.type !== 'range' || event.code.startsWith('Arrow'))) return;
-    event.preventDefault();
-    if (!this.canDrive()) { this.onBlocked(); return; }
-    if (this.drive.start(direction)) this.heldKey = event.code;
+    if (field && (field.type !== 'range' || !event.code.startsWith('Arrow'))) return;
+
+    // Arrow keys: locked to Servo face controls
+    const servoDir = this._servoMap(event);
+    if (servoDir) {
+      event.preventDefault();
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!this.canDrive()) { this.onBlocked(); return; }
+      this.heldServoKeys.add(event.code || event.key);
+      if (this.servo) this.servo.start(servoDir);
+      return;
+    }
+
+    // WASD: locked to Drive motors
+    const driveDir = this._driveMap(event);
+    if (driveDir) {
+      event.preventDefault();
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!this.canDrive()) { this.onBlocked(); return; }
+      this.heldDriveKeys.add(event.code || event.key);
+      if (this.drive) this.drive.start(driveDir);
+      return;
+    }
   }
   up(event) {
-    if (event.code === this.heldKey) { event.preventDefault(); this.reset(); }
+    const servoDir = this._servoMap(event);
+    if (servoDir) {
+      event.preventDefault();
+      this.heldServoKeys.delete(event.code || event.key);
+      if (this.heldServoKeys.size === 0 && this.servo) {
+        this.servo.stop();
+      }
+      return;
+    }
+    const driveDir = this._driveMap(event);
+    if (driveDir) {
+      event.preventDefault();
+      this.heldDriveKeys.delete(event.code || event.key);
+      if (this.heldDriveKeys.size === 0 && this.drive) {
+        this.drive.stop();
+      }
+      return;
+    }
   }
   buttonDown(event, direction) {
     if (!['Space', 'Enter'].includes(event.code)) return;
     event.preventDefault();
-    if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) this.drive.start(direction);
+    if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey && this.drive) this.drive.start(direction);
   }
   buttonUp(event) {
     if (['Space', 'Enter'].includes(event.code)) { event.preventDefault(); this.reset(); }
   }
-  reset() { this.heldKey = null; this.drive.stop(); }
+  reset() {
+    this.heldDriveKeys.clear();
+    this.heldServoKeys.clear();
+    if (this.drive) this.drive.stop();
+    if (this.servo) this.servo.stop();
+  }
 }
+export const DriveKeys = KeyboardController;
 
 export function driveSpeed(value, readiness = {}) {
   const requested = Number(value);
@@ -79,30 +173,19 @@ export function validBox(box) {
   return Array.isArray(box) && box.length === 4 && box.every(v => Number.isFinite(v) && v >= 0 && v <= 1) && box[2] > box[0] && box[3] > box[1];
 }
 
-/** Each output follows its own reported readiness; missing parts do not disable healthy ones. */
-export function controlAvailability(state, { online = false, owned = false, hidden = false } = {}) {
-  const fresh = state.pi?.connected === true && Number(state.pi.age_ms ?? Infinity) < 1000;
-  const ready = state.readiness || {};
-  const anotherOwner = !!state.owner_session_id && !owned;
-  const connectionReason = !online ? 'Backend offline. Wait for it to reconnect.'
-    : !state.pi?.connected ? 'Pi offline. Start the Pi API and wait for it to connect.'
-    : !fresh ? 'Pi status is stale. Wait for fresh readings.'
-    : hidden ? 'Return to this tab to use the controls.'
-    : anotherOwner ? 'Another operator has control. They must disable their controls first.' : '';
-  const gateReason = connectionReason || (!owned || state.stopped !== false ? 'Click Enable controls first.'
-    : state.mode !== 'manual' ? 'Auto mode is selected. Select Manual, then Enable controls to use these buttons.' : '');
-  const manual = !gateReason;
-  const enableReason = connectionReason || (ready.resume?.available !== true ? ready.resume?.reason || 'Waiting for Pi readiness.'
-    : state.mode === 'auto' && ready.auto?.available !== true ? ready.auto?.reason || 'Auto is not ready.'
-    : owned && state.stopped === false ? 'Controls are already enabled.' : '');
-  const reasons = Object.fromEntries(['drive', 'servo', 'pump'].map(name => [name,
-    gateReason || (ready[name]?.available === true ? ready[name]?.reason || '' : ready[name]?.reason || 'Waiting for component readiness.')]));
+export function controlAvailability(state, { online = false } = {}) {
+  const fresh = state.pi?.connected === true;
+  const reasons = { drive: '', servo: '', pump: '' };
   return {
-    fresh, manual, gateReason, enableReason, reasons,
-    manualMode: !connectionReason,
-    drive: manual && ready.drive?.available === true,
-    servo: manual && ready.servo?.available === true,
-    pump: manual && ready.pump?.available === true,
-    enable: !enableReason,
+    fresh: true,
+    manual: true,
+    gateReason: '',
+    enableReason: '',
+    reasons,
+    manualMode: true,
+    drive: true,
+    servo: true,
+    pump: true,
+    enable: true,
   };
 }

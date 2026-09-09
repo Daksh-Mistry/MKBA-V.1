@@ -95,15 +95,19 @@ async def dispatch_ws_message(websocket, message):
             log_command(websocket, {"type": "drive", "left": left, "right": right, "speed": speed})
             _robot_ref.drive(left, right, speed)
         elif kind == "servo":
-            pan, tilt = data.get("pan"), data.get("tilt")
-            if pan is None and tilt is None:
-                raise ValueError("servo requires pan or tilt")
-            if pan is not None:
-                pan = number(pan, "pan", -180, 180)
-            if tilt is not None:
-                tilt = number(tilt, "tilt", -180, 180)
-            log_command(websocket, {"type": "servo", "pan": pan, "tilt": tilt})
-            _robot_ref.move_servos(pan, tilt)
+            if data.get("action") == "center" or data.get("center") is True:
+                log_command(websocket, {"type": "servo", "action": "center"})
+                _robot_ref.center_servos()
+            else:
+                pan, tilt = data.get("pan"), data.get("tilt")
+                if pan is None and tilt is None:
+                    raise ValueError("servo requires pan or tilt")
+                if pan is not None:
+                    pan = number(pan, "pan", -180, 180)
+                if tilt is not None:
+                    tilt = number(tilt, "tilt", -180, 180)
+                log_command(websocket, {"type": "servo", "pan": pan, "tilt": tilt})
+                _robot_ref.move_servos(pan, tilt)
         elif kind == "pump":
             on = data.get("on")
             if not isinstance(on, bool):

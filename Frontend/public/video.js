@@ -25,7 +25,6 @@ export class PiVideo {
     const failed = message => {
       if (generation !== this.generation) return;
       this.onStatus('error', message);
-      if (!this.retry) this.retry = setTimeout(() => { this.retry = null; this.connect(source).catch(() => {}); }, 5000);
     };
     peer.ontrack = event => {
       if (generation !== this.generation) return;

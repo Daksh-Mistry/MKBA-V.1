@@ -9,22 +9,8 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <main id="login-screen" class="login-shell">
-    <form id="login-form" class="login-card">
-      <div class="brand-mark" aria-hidden="true">R</div>
-      <p class="eyebrow">YOUR ROBOT, CONNECTED</p>
-      <h1>Welcome to Robo.</h1>
-      <p class="muted">Open your control room to see, move and talk with your robot.</p>
-      <button id="local-connect" class="secondary" type="button" hidden>Open on this computer</button>
-      <label for="access-token">Console access token</label>
-      <input id="access-token" name="token" type="password" autocomplete="current-password" required maxlength="256" placeholder="Enter your private access token">
-      <button id="login-button" class="primary" type="submit">Open control room <span aria-hidden="true">↗</span></button>
-      <p id="login-error" class="form-error" role="alert"></p>
-      <p class="micro">Local access opens automatically. The token is only for a protected LAN deployment. Chat works without an LLM API key.</p>
-    </form>
-  </main>
-
-  <main id="console-screen" class="console" hidden>
+  <main id="login-screen" class="login-shell" hidden></main>
+  <main id="console-screen" class="console">
     <header class="topbar">
       <div class="brand"><span class="brand-mark small" aria-hidden="true">R</span><div><strong>Robo</strong><span class="brand-sub">CONTROL ROOM</span></div></div>
       <nav class="connection-strip" aria-label="Service connections">
@@ -44,7 +30,7 @@
         <div id="video-stage" class="video-stage">
           <video id="camera" autoplay muted playsinline aria-label="Live video from the robot"></video>
           <canvas id="overlay" aria-hidden="true"></canvas>
-          <div id="video-placeholder" class="video-placeholder"><span class="camera-symbol" aria-hidden="true">◎</span><strong>Ready when Robo is.</strong><p id="video-message">Connect the Pi camera to bring this view to life.</p></div>
+          <div id="video-placeholder" class="video-placeholder"><span class="camera-symbol" aria-hidden="true">📷</span><strong>Direct Camera Stream</strong><p id="video-message">Connect Pi camera / MediaMTX to view live video.</p></div>
           <div class="video-hud"><span id="vision-summary">Detection idle</span><span id="overlay-age">Direct camera view</span></div>
         </div>
         <div class="video-toolbar"><button id="video-connect" class="secondary">Connect video</button><a id="raw-viewer" class="text-link" target="_blank" rel="noopener noreferrer" hidden>Open camera ↗</a><label class="checkbox"><input id="show-boxes" type="checkbox" checked> Detection boxes</label></div>
@@ -53,17 +39,17 @@
       </section>
 
       <section class="controls-panel panel" aria-labelledby="controls-heading">
-        <div class="panel-heading"><div><p class="eyebrow">MOVEMENT</p><h2 id="controls-heading">Take the wheel</h2></div><span id="ownership-label" class="tiny-tag">Viewing</span></div>
-        <div class="session-controls"><button id="enable" class="primary" disabled>Enable controls</button><button id="release" class="quiet" disabled>Disable controls</button></div>
-        <p class="panel-note">Enable controls once to use this browser. Disable controls stops the robot and lets another browser control it.</p>
-        <div class="segmented" role="group" aria-label="Operating mode"><button id="manual-mode" aria-pressed="true" disabled>Manual</button><button id="auto-mode" aria-pressed="false" disabled>Auto</button></div>
-        <div class="control-columns"><div><h3>Drive <span class="muted">hold to move</span></h3><div class="direction-pad drive-pad" role="group" aria-label="Hold to drive"><button data-drive="forward" class="north" aria-label="Drive forward" disabled>↑</button><button data-drive="left" class="west" aria-label="Turn left" disabled>←</button><span class="pad-center" aria-hidden="true">WASD</span><button data-drive="right" class="east" aria-label="Turn right" disabled>→</button><button data-drive="backward" class="south" aria-label="Drive backward" disabled>↓</button></div></div>
-        <div><h3>Face <span class="muted">5° per tap</span></h3><div class="direction-pad face-pad" role="group" aria-label="Move robot face"><button data-servo="up" class="north" aria-label="Look up 5 degrees" disabled>↑</button><button data-servo="left" class="west" aria-label="Look left 5 degrees" disabled>←</button><span class="pad-center face-icon" aria-hidden="true">··</span><button data-servo="right" class="east" aria-label="Look right 5 degrees" disabled>→</button><button data-servo="down" class="south" aria-label="Look down 5 degrees" disabled>↓</button></div></div></div>
+        <div class="panel-heading"><div><p class="eyebrow">MOVEMENT</p><h2 id="controls-heading">Take the wheel</h2></div><span id="ownership-label" class="tiny-tag">Controls Active</span></div>
+        <div class="session-controls"><button id="enable" class="switch-btn is-active" aria-pressed="true">Controls Enabled</button><button id="release" class="switch-btn" aria-pressed="false">Controls Disabled</button></div>
+        <p class="panel-note">Click Controls Enabled to take control. Click Controls Disabled to pause inputs.</p>
+        <div class="segmented" role="group" aria-label="Operating mode"><button id="manual-mode" class="is-active" aria-pressed="true">Manual</button><button id="auto-mode" aria-pressed="false">Auto</button></div>
+        <div class="control-columns"><div><h3>Drive <span class="muted">WASD (hold to move)</span></h3><div class="direction-pad drive-pad" role="group" aria-label="Hold to drive"><button data-drive="forward" class="north" aria-label="Drive forward" disabled>↑</button><button data-drive="left" class="west" aria-label="Turn left" disabled>←</button><span class="pad-center" aria-hidden="true">WASD</span><button data-drive="right" class="east" aria-label="Turn right" disabled>→</button><button data-drive="backward" class="south" aria-label="Drive backward" disabled>↓</button></div></div>
+        <div><h3>Face <span class="muted">Arrows (2/sec on hold)</span></h3><div class="direction-pad face-pad" role="group" aria-label="Move robot face"><button data-servo="up" class="north" aria-label="Look up" disabled>↑</button><button data-servo="left" class="west" aria-label="Look left" disabled>←</button><button data-servo="center" class="pad-center face-icon face-center-btn" title="Center face gimbal (90°/90° or press C)" aria-label="Center face gimbal" disabled>⊙</button><button data-servo="right" class="east" aria-label="Look right" disabled>→</button><button data-servo="down" class="south" aria-label="Look down" disabled>↓</button></div></div></div>
         <div class="speed-row"><label for="speed">Drive speed <output id="speed-value" for="speed">20%</output></label><input id="speed" type="range" min="0.1" max="0.6" step="0.05" value="0.2"></div>
-        <p id="drive-note" class="panel-note" role="status">Enable controls, then hold WASD, arrow keys or a direction button.</p>
+        <p id="drive-note" class="panel-note" role="status">Hold WASD to drive. Hold Arrow keys to step face servos (2/sec).</p>
         <div class="actuator-row"><span class="micro">FACE <strong id="servo-position">— / —</strong></span><span class="micro">PUMP <strong id="pump-state">Unknown</strong></span></div>
-        <div class="pump-row"><button id="pump-on" class="secondary" disabled>Pump burst</button><button id="pump-off" class="quiet" disabled>Turn pump off</button></div>
-        <p id="pump-note" class="panel-note" role="status">Enable controls to use the pump.</p>
+        <div class="pump-row"><button id="pump-toggle" class="secondary pump-toggle-btn" aria-pressed="false"><span class="pump-glow-dot"></span> Water Pump: <span id="pump-toggle-text">OFF</span></button></div>
+        <p id="pump-note" class="panel-note" role="status">Click to turn water pump ON / OFF.</p>
         <p id="hardware-issue" class="panel-note hardware-issue" role="status" hidden></p>
         <details class="operating-check"><summary>Control availability &amp; auto operating check</summary><pre id="readiness-summary">Waiting for Pi status.</pre><button id="alignment-check" class="secondary small-button" disabled>Confirm camera / nozzle check</button><p class="micro">Missing or unverified IR inputs limit manual driving to short, slow tests. Trigger and release each IR sensor to verify its input. Auto also requires the camera/nozzle operating check. Available face and pump controls work independently.</p></details>
         <p class="panel-note">Release a direction to stop. Stop robot also turns the pump off and centers the face. Click Enable controls again after Stop.</p>
@@ -76,13 +62,13 @@
       </section>
 
       <section class="chat-panel panel" aria-labelledby="chat-heading">
-        <div class="panel-heading"><div><p class="eyebrow">A LITTLE PERSONALITY</p><h2 id="chat-heading">Talk to Robo</h2></div><button id="speech-stop" class="quiet small-button" disabled>Stop voice</button></div>
-        <div id="chat-history" class="chat-history" role="log" aria-live="polite" aria-relevant="additions text"><article class="chat-message robot"><span class="message-author">ROBO</span><p>I'm ready to chat. Try “look right” when you have control, or ask me about my surroundings.</p></article></div>
-        <form id="chat-form" class="chat-form"><label class="sr-only" for="chat-input">Message Robo</label><textarea id="chat-input" maxlength="2000" rows="2" placeholder="Say something to Robo…" disabled></textarea><button id="chat-send" class="primary" type="submit" disabled>Send <span aria-hidden="true">↗</span></button></form>
-        <div class="chat-options"><label class="checkbox"><input id="speak" type="checkbox"> Speak on Pi speaker</label><span id="chat-status" class="micro">Chat connects through your backend.</span></div>
+        <div class="panel-heading"><div><p class="eyebrow">A LITTLE PERSONALITY</p><h2 id="chat-heading">Talk to Robo</h2></div></div>
+        <div id="chat-history" class="chat-history" role="log" aria-live="polite" aria-relevant="additions text"><article class="chat-message robot"><span class="message-author">ROBO</span><p>I'm ready to chat. Try “look right” or ask me about surroundings.</p></article></div>
+        <form id="chat-form" class="chat-form"><label class="sr-only" for="chat-input">Message Robo</label><textarea id="chat-input" maxlength="2000" rows="2" placeholder="Say something to Robo…"></textarea><button id="chat-send" class="primary" type="submit">Send <span aria-hidden="true">↗</span></button></form>
+        <div class="chat-options"><span id="chat-status" class="micro">Chat connects through your backend.</span></div>
       </section>
     </div>
-    <details class="diagnostics panel"><summary>Connection details & activity <span id="last-event" class="micro">Waiting for services</span></summary><div class="diagnostics-body"><div><h3>System</h3><pre id="system-details">No state received.</pre><button id="refresh" class="secondary small-button">Refresh connections</button><button id="shutdown" class="danger-text small-button" disabled>Shut down Pi script</button></div><div><h3>Recent activity</h3><ol id="activity-log" class="activity-log" aria-live="off"></ol></div></div></details>
+    <details class="diagnostics panel" open><summary>Connection details & live activity log <span id="last-event" class="micro">Waiting for services</span></summary><div class="diagnostics-body"><div><h3>System</h3><pre id="system-details">No state received.</pre><button id="refresh" class="secondary small-button">Refresh connections</button><button id="shutdown" class="danger-text small-button" disabled>Shut down Pi script</button></div><div><h3>Live Command & Activity Log</h3><ol id="activity-log" class="activity-log" aria-live="off"></ol></div></div></details>
     <footer class="footer"><span>ROBO / LOCAL CONTROL</span><span id="footer-status">Awaiting connection</span></footer>
     <div id="toast" class="toast" role="status" hidden></div>
   </main>
