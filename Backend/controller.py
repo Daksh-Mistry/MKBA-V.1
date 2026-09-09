@@ -15,6 +15,8 @@ from .sensors import SensorProcessor
 from .robot_profile import DRIVE, LOOK, PROFILE_ID, unavailable_hardware, validate_hardware
 
 IDENTIFIER = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$')
+MANUAL_TEST_SPEED = 0.2
+MANUAL_TEST_SECONDS = 2.0
 
 
 def number(value, name, low, high):
@@ -51,7 +53,7 @@ class RobotController:
         self.owner = None
         self.mode = 'manual'
         self.stopped = True
-        self.stop_reason = 'Startup: claim control and explicitly resume'
+        self.stop_reason = 'Startup: enable controls when ready'
         self.generation = 0
         self.pi_connected = self.pi_watchdog = self.pi_simulation = False
         self.pi_speech = False
@@ -81,6 +83,9 @@ class RobotController:
         self.drive = None
         self.drive_until = None
         self.last_drive_send = 0.0
+        self.manual_test_until = None
+        self.drive_requires_release = False
+        self.drive_is_limited = False
         self.pump_until = None
         self.last_pump_off = -1000.0
         self.last_servo = -1000.0
@@ -154,14 +159,14 @@ class RobotController:
 
     def _owner_required(self, sid):
         if self.owner != sid:
-            raise ValueError('Claim control before changing the robot')
+            raise ValueError('Enable controls before changing the robot')
         if self.clock() - self.sessions[sid].heartbeat > self.settings.owner_timeout:
-            raise ValueError('Operator heartbeat expired; claim control again')
+            raise ValueError('Operator heartbeat expired; enable controls again')
 
     def _ready(self, sid, *, manual=True):
         self._owner_required(sid)
         if self.stopped:
-            raise ValueError('Robot is stopped; explicitly resume first')
+            raise ValueError('Robot is stopped; enable controls first')
         if manual and self.mode != 'manual':
             raise ValueError('Switch to manual mode first')
         self._pi_ready()
@@ -183,6 +188,33 @@ class RobotController:
                 raise ValueError('IR signals are not yet verified: trigger and release each of the four sensors; a steady GPIO input cannot prove a sensor is attached')
             raise ValueError('All four IR readings must be fresh and clear')
 
+    def _known_ir_hazard(self):
+        return any(value is True and (not self.sensors.require_signal_evidence or self.sensors.signal_observed[index])
+                   for index, value in enumerate(self.sensors.ir))
+
+    def _manual_motion_ready(self):
+        self._component_ready('motors')
+        if self.drive_requires_release:
+            raise ValueError('Manual test finished; release the direction before pressing again')
+        if self._known_ir_hazard():
+            raise ValueError('An IR sensor reports an obstacle; clear it before driving')
+
+    def _manual_test_limited(self):
+        return self.manual_test_until is not None or not self.sensors.clear(self.clock(), self.settings.telemetry_timeout)
+
+    def _reset_manual_drive(self):
+        self.manual_test_until = None
+        self.drive_requires_release = False
+        self.drive_is_limited = False
+
+    def _pump_ready(self):
+        self._component_ready('pump')
+        if self.pump_until is not None or self.pump:
+            raise ValueError('Pump burst is running')
+        remaining = max(0, 3 - (self.clock() - self.last_pump_off))
+        if remaining:
+            raise ValueError(f'Pump cooldown: {remaining:.1f} seconds remaining')
+
     def _component_ready(self, name):
         part = self.hardware[name]
         if not part['available']:
@@ -200,14 +232,21 @@ class RobotController:
 
     def readiness(self):
         result = {'profile': PROFILE_ID, 'alignment_confirmed': self.alignment_confirmed or self.settings.auto_calibrated}
-        for name, check in (('resume', lambda: None), ('drive', self._motion_ready), ('servo', lambda: self._component_ready('servos')),
-                            ('pump', lambda: self._component_ready('pump')), ('auto', self._auto_ready)):
+        for name, check in (('resume', lambda: None), ('drive', self._manual_motion_ready), ('servo', lambda: self._component_ready('servos')),
+                            ('pump', self._pump_ready), ('auto', self._auto_ready)):
             try:
                 self._pi_ready()
                 check()
                 result[name] = {'available': True, 'reason': None}
             except ValueError as error:
                 result[name] = {'available': False, 'reason': str(error)}
+        limited = self._manual_test_limited()
+        result['drive'].update(limited=limited, max_speed=min(self.settings.maximum_speed, MANUAL_TEST_SPEED) if limited else self.settings.maximum_speed,
+                               max_hold_ms=int(MANUAL_TEST_SECONDS * 1000) if limited else None,
+                               requires_release=self.drive_requires_release)
+        if limited and result['drive']['available']:
+            result['drive']['reason'] = 'IR inputs unverified or unavailable: manual test at up to 20% power for 2 seconds; release before another press'
+        result['pump']['cooldown_ms'] = math.ceil(max(0, 3 - (self.clock() - self.last_pump_off)) * 1000)
         return result
 
     async def _send_pi(self, data):
@@ -228,6 +267,7 @@ class RobotController:
         self.stop_reason = reason
         self.generation += 1
         self.drive = self.drive_until = self.pump_until = None
+        self._reset_manual_drive()
         self.last_pump_off = self.clock()
         if self.auto.phase not in {'complete', 'blocked'}:
             self.auto.phase = 'paused'
@@ -249,10 +289,39 @@ class RobotController:
 
     async def _drive(self, direction, speed, duration):
         self._motion_ready()
+        self.drive_is_limited = False
         left, right = DRIVE[direction]
         self.drive = {'type': 'drive', 'left': left, 'right': right, 'speed': speed}
         self.drive_until = self.clock() + duration
         self.last_drive_send = self.clock()
+        await self._send_pi(self.drive)
+
+    async def _finish_manual_test(self):
+        self.drive = self.drive_until = None
+        self.manual_test_until = None
+        self.drive_is_limited = False
+        self.drive_requires_release = True
+        await self._send_pi({'type': 'drive', 'left': 0, 'right': 0, 'speed': 0})
+        self._broadcast({'type': 'event', 'code': 'manual_test_finished',
+                         'message': 'Manual test stopped; release the direction before pressing again'})
+
+    async def _manual_drive(self, direction, speed):
+        self._manual_motion_ready()
+        now = self.clock()
+        if self.manual_test_until is not None and now >= self.manual_test_until:
+            await self._finish_manual_test()
+            raise ValueError('Manual test finished; release the direction before pressing again')
+        limited = self._manual_test_limited()
+        if limited and self.manual_test_until is None:
+            self.manual_test_until = now + MANUAL_TEST_SECONDS
+        left, right = DRIVE[direction]
+        self.drive_is_limited = limited
+        self.drive = {'type': 'drive', 'left': left, 'right': right,
+                      'speed': min(speed, MANUAL_TEST_SPEED) if limited else speed}
+        self.drive_until = now + self.settings.drive_input_timeout
+        if limited:
+            self.drive_until = min(self.drive_until, self.manual_test_until)
+        self.last_drive_send = now
         await self._send_pi(self.drive)
 
     async def _servo(self, pan, tilt):
@@ -367,8 +436,23 @@ class RobotController:
                                  'Stop state set; physical execution requires Pi telemetry' if command == 'stop' else 'Pi script shutdown sent')
                     return
                 if kind == 'control':
-                    command = choice(data.get('command'), 'control command', {'claim', 'release', 'resume'})
-                    if command == 'claim':
+                    command = choice(data.get('command'), 'control command', {'claim', 'release', 'resume', 'enable'})
+                    if command == 'enable':
+                        if self.owner not in (None, sid):
+                            raise ValueError('Another operator owns control')
+                        self._pi_ready()
+                        if self.mode == 'auto':
+                            self._auto_ready()
+                        self.owner = sid
+                        session.heartbeat = self.clock()
+                        if self.stopped:
+                            if self.mode == 'auto':
+                                self.auto.reset()
+                                self.auto.phase = 'observe'
+                            self.stopped = False
+                            self.stop_reason = None
+                            self.generation += 1
+                    elif command == 'claim':
                         if self.owner not in (None, sid):
                             raise ValueError('Another operator owns control')
                         self.owner = sid
@@ -413,10 +497,17 @@ class RobotController:
                     choice(data.get('command'), 'speech command', {'stop'})
                     self._background(self._speech_stop(sid, rid))
                     return
+                # Recover from an unowned auto session whose prerequisites are
+                # missing. Selecting Manual is explicit intent, but only stops
+                # outputs; Enable controls is still required before actuation.
+                if kind == 'mode' and data.get('value') == 'manual' and self.owner is None:
+                    self._pi_ready()
+                    self.owner = sid
+                    session.heartbeat = self.clock()
                 self._owner_required(sid)
                 if kind == 'mode':
                     value = choice(data.get('value'), 'mode', {'manual', 'auto'})
-                    await self._stop('Mode changed; explicitly resume')
+                    await self._stop('Mode changed; enable controls when ready')
                     self.mode = value
                     self.auto.reset()
                     await self._send_pi({'type': 'mode', 'value': value})
@@ -435,12 +526,16 @@ class RobotController:
                     speed = number(data.get('speed', 0.2), 'speed', 0, self.settings.maximum_speed)
                     if direction == 'stop' or speed == 0:
                         self._component_ready('motors')
+                        self._reset_manual_drive()
                         await self._override()
                         await self._send_pi({'type': 'drive', 'left': 0, 'right': 0, 'speed': 0})
                     else:
                         self._ready(sid)
+                        if self.drive_is_limited and self.drive_until is not None and self.clock() >= self.drive_until:
+                            await self._finish_manual_test()
+                            raise ValueError('Manual test finished; release the direction before pressing again')
                         await self._override()
-                        await self._drive(direction, speed, self.settings.drive_input_timeout)
+                        await self._manual_drive(direction, speed)
                 elif kind == 'servo':
                     self._ready(sid)
                     direction = choice(data.get('direction'), 'face direction', LOOK)
@@ -568,7 +663,7 @@ class RobotController:
                     'control_timeout', 'watchdog_hardware_error', 'telemetry_error',
                 }):
                     await self._stop('Pi safety watchdog or hardware fault stopped the robot')
-                if self.drive is not None and not self.sensors.clear(now, self.settings.telemetry_timeout):
+                if self.drive is not None and (self._known_ir_hazard() if self.drive_is_limited else not self.sensors.clear(now, self.settings.telemetry_timeout)):
                     await self._stop('IR hazard or unknown reading while driving')
                 if self.mode == 'auto' and not self.stopped and not self.sensors.clear(now, self.settings.telemetry_timeout):
                     await self._stop('IR hazard or unknown reading in auto')
@@ -836,10 +931,14 @@ class RobotController:
                 self.ml_error = 'Old model workers did not stop; restart ML before selecting a model'
             if self.drive is not None:
                 if now >= self.drive_until:
-                    self.drive = self.drive_until = None
-                    with contextlib.suppress(ValueError):
-                        await self._send_pi({'type': 'drive', 'left': 0, 'right': 0, 'speed': 0})
-                elif not self.sensors.clear(now, self.settings.telemetry_timeout):
+                    if self.drive_is_limited:
+                        with contextlib.suppress(ValueError):
+                            await self._finish_manual_test()
+                    else:
+                        self.drive = self.drive_until = None
+                        with contextlib.suppress(ValueError):
+                            await self._send_pi({'type': 'drive', 'left': 0, 'right': 0, 'speed': 0})
+                elif (self._known_ir_hazard() if self.drive_is_limited else not self.sensors.clear(now, self.settings.telemetry_timeout)):
                     await self._stop('IR readings are stale or blocked')
                 elif now - self.last_drive_send >= 0.09:
                     with contextlib.suppress(ValueError):

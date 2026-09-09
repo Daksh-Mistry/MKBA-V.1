@@ -138,11 +138,12 @@ async def exercise(base_url, pi_url, backend_url, tokens, media, backend_process
                 await fresh(lambda state: state.get("pi", {}).get("connected") and
                             all(item["valid"] and item["blocked"] is False for item in state["sensors"]["ir"]),
                             label="connected Pi with filtered clear sensors")
-                await accepted(client, "control", command="claim")
-                await accepted(client, "control", command="resume")
+                await accepted(client, "control", command="enable")
                 await fresh(lambda state: state["owner_session_id"] == hello["session_id"] and not state["stopped"],
                             label="resumed owner")
-                checks.append("exclusive control claim and explicit resume")
+                checks.append("one-step Enable controls claims ownership and resumes without starting outputs")
+                assert not (await snapshot())["drive_active"]
+                assert (await snapshot())["pump"] is False
                 await accepted(client, "servo", direction="right", degrees=5)
                 state = await fresh(lambda state: state.get("servos", {}).get("pan") == 85, label="face moves right")
                 assert state["pi"].get("simulation") is True, state["pi"]
@@ -199,7 +200,7 @@ async def exercise(base_url, pi_url, backend_url, tokens, media, backend_process
                     second = Client(second_ws)
                     try:
                         await second.wait(lambda event: event.get("type") == "hello")
-                        result = await second.outcome(await second.send("control", command="claim"))
+                        result = await second.outcome(await second.send("control", command="enable"))
                         assert result["status"] == "rejected", result
                         await accepted(second, "system", command="stop")
                         await fresh(lambda state: state["stopped"] and state["servos"]["pan"] == 90,

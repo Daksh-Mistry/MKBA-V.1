@@ -133,11 +133,12 @@ Every example below is an independent complete message. If using them on one soc
 ### Session and operating check
 
 ```json
-{"type":"control","command":"claim","request_id":"claim-1","seq":1}
+{"type":"control","command":"enable","request_id":"enable-1","seq":1}
 ```
 
-`control.command` is `claim`, `release` or `resume`:
+`control.command` is `enable`, `claim`, `release` or `resume`. The normal UI's **Enable controls** uses `enable`; **Disable controls** uses `release`. Legacy clients can continue using separate claim/resume steps:
 
+- `enable`: take unowned control, or use your existing ownership, and clear the stop latch after fresh/watchdog-capable Pi and mode-specific readiness checks. Another owner or an unready Pi rejects it. Auto retains its full prerequisites. It does not itself send a movement request.
 - `claim`: acquire unowned control, or renew your own claim. It also refreshes that session's heartbeat. Another owner causes rejection. Claim does not resume.
 - `release`: owner only; stop outputs and release ownership.
 - `resume`: owner only; fresh/watchdog-capable Pi with acceptable fault/simulation state required. Auto adds its full prerequisites. Success clears the stop latch and invalidates older pending gesture generations. It does not itself move a motor.
@@ -160,7 +161,9 @@ Only `confirm_alignment` exists. Owner must be stopped, Pi fresh/ready, servos a
 {"type":"drive","direction":"forward","speed":0.2,"request_id":"drive-4","seq":4}
 ```
 
-`direction` is required: `forward`, `backward`, `left`, `right`, `stop`. Optional `speed` defaults to 0.2 and must be between 0 and 0.6. A nonzero movement requires owner, resumed manual mode, fresh Pi, motors and all four usable clear IR inputs. Send new drive requests about ten times per second while held. A single request expires after 400 ms even if heartbeat continues.
+`direction` is required: `forward`, `backward`, `left`, `right`, `stop`. Optional `speed` defaults to 0.2 and must be between 0 and 0.6. A nonzero movement requires owner, enabled manual mode, fresh Pi and available motors. With all four verified fresh clear IR inputs, normal held driving is available. Missing or unverified IR automatically limits manual output to at most speed 0.2 and two seconds per press. A verified known obstacle blocks/stops movement. These limits do not apply as a fallback for auto or chat movement; those still require all four usable clear IR inputs.
+
+Send new drive requests about ten times per second while held. A single request expires after 400 ms even if heartbeat continues. In limited manual driving, repeated updates cannot extend the fixed two-second deadline. Reaching either the input timeout or the two-second cap requires a release: send drive stop before starting a fresh press. Continuing to send held movement is not a new press.
 
 `direction:"stop"` or `speed:0` clears current timed outputs and sends zero drive. It requires the owner and available motors but does not require resumed/manual mode. It does **not** latch whole-robot stop or exit auto; use `system stop` for that.
 
@@ -188,6 +191,8 @@ The built-in profile converts semantic directions to Pi left/right signs:
 
 `on` is a required JSON boolean. Optional `duration_ms` defaults to 800 and must be 100–1000; it is validated even for an off request. Pump on requires owner, resumed manual mode, fresh Pi, available pump, no active burst and at least three seconds since backend-recorded pump off/stop. Backend first sends off to rearm the Pi limit, then on, and schedules off at the deadline. Repeated on does not extend a burst.
 
+Pump readiness includes active-burst/cooldown status. The normal UI requests 800 ms and disables the burst button while displaying its three-second cooldown. Pi independently enforces a one-second maximum.
+
 ```json
 {"type":"pump","on":false,"request_id":"pump-off-7","seq":7}
 ```
@@ -200,7 +205,7 @@ Pump off requires the owner and available pump. It clears the pump deadline and 
 {"type":"mode","value":"auto","request_id":"mode-8","seq":8}
 ```
 
-Owner only. `value` is `manual` or `auto`. It stops outputs, changes backend mode, forwards the label to Pi and resets auto state. Selecting auto starts vision if there is no session. Auto remains stopped until an explicit successful Resume. Manual driving/face/burst requests do not implicitly switch an auto session to manual.
+`value` is `manual` or `auto`. Normally owner only. When no browser owns control and Pi status is fresh, selecting `manual` also takes ownership while keeping outputs stopped. This lets a new browser leave an Auto session whose prerequisites are unavailable. It cannot take control from another owner. The mode request stops outputs, changes backend mode, forwards the label to Pi and resets auto state. Selecting auto starts vision if there is no session. A mode change remains stopped until an explicit successful `enable` or legacy `resume`. Manual driving/face/burst requests do not implicitly switch an auto session to manual.
 
 ```json
 {"type":"vision","command":"start","model_id":"fire-smoke-v8n","request_id":"vision-9","seq":9}
@@ -231,6 +236,8 @@ Any authenticated viewer may send `system stop`. It latches backend stop, clears
 Recognized full-sentence gestures include `look left/right/up/down`, `move forward/backward/backwards`, `move a little [bit] forward/backward`, `move a bit forward/backward`, `turn left/right`, and `stop`. Supported polite wrappers include `please`, `can you` or `could you`, optional trailing `please` and one sentence-ending punctuation mark. The parser matches the entire normalized sentence. Negations, multiple actions, pump requests, durations supplied in prose and arbitrary LLM tool calls do not become robot commands.
 
 ML can propose a bounded gesture; backend independently checks the original sentence, exact proposal fields/identity, lifetime ≤1000 ms measured from request start, action ID, current generation and hardware limits. Face proposals are at most 5°; drive/turn proposals at most 300 ms and speed 0.2. Recent action IDs are consumed once (bounded 1024-ID cache). A stop/manual override invalidates older pending requests. Exact stop phrases bypass ML/chat capacity and immediately request system stop, even while another conversation is pending.
+
+Drive/turn gestures require all four usable clear IR inputs. Missing/unverified IR does not grant chat the limited manual motor allowance.
 
 Ordinary chat gets an accepted command result and later `chat.reply`. A direct stop phrase gets `chat.reply` without the ordinary accepted result. Speech is opt-in and owner/resume/generation/capability gated. Gesture execution changes the generation, so a gesture-bearing chat reply may block its same-request speech rather than treating narration as playback confirmation.
 
@@ -369,7 +376,7 @@ Component state is `unknown` before telemetry, then `available`, `unavailable`, 
 `sensors` fields:
 
 - `raw.ir_array`, `raw.flame_array`: four integers each, 0/1 or -1 for invalid/unavailable. Booleans, wrong lengths and failed hardware channels normalize to -1.
-- `ir`: four objects with `position` 0–3, `blocked:boolean|null`, `valid:boolean`, `signal_observed:boolean`, `motion_usable:boolean`. A valid active IR signal is blocked immediately; clear requires two samples. `motion_usable` means a valid signal with required evidence, **not** that the reading is clear; driving needs both usable and `blocked:false` for all four.
+- `ir`: four objects with `position` 0–3, `blocked:boolean|null`, `valid:boolean`, `signal_observed:boolean`, `motion_usable:boolean`. A valid active IR signal is blocked immediately; clear requires two samples. `motion_usable` means a valid signal with required evidence, **not** that the reading is clear. Normal held driving, auto and chat movement need both usable and `blocked:false` for all four; limited manual driving is described above.
 - `flame`: four objects with `position`, `detected:boolean|null`, `valid:boolean`. Pi already maps an active flame digital input to 1. It is a signal reading, not ML confidence or verified physical presence.
 - `fresh:boolean`, `age_ms:number|null`, `signal_evidence_required:boolean`. Real Pi 2.3 requires evidence; explicit simulation does not masquerade as real signal evidence.
 
@@ -377,7 +384,16 @@ Position order follows the Pi mapping: front-left, front-right, rear-left, rear-
 
 `auto` contains `phase`, `reason:string|null`, `bursts:integer`, `chassis_motion:false`, `confirmed_frames:integer`. Phases are `paused`, `observe`, `search`, `confirm`, `align`, `spray`, `reassess`, `complete`, `blocked`. See [the implemented state machine](../Backend/README.md#auto-state-machine).
 
-`readiness` contains `profile:"mkba-v1"`, `alignment_confirmed:boolean`, and `resume`, `drive`, `servo`, `pump`, `auto`; each availability entry is `{"available":true,"reason":null}` or `{"available":false,"reason":"explanation"}`. This checks hardware/prerequisites only. A viewer still needs ownership/resume/manual mode where applicable. Manual Resume can be available with no actuators, allowing monitoring/conversation while each unavailable output remains blocked.
+`readiness` contains `profile:"mkba-v1"`, `alignment_confirmed:boolean`, and `resume`, `drive`, `servo`, `pump`, `auto`. Each availability entry includes `available:boolean` and `reason:string|null`. An available limited-drive entry can have a reason explaining its limits; do not treat every nonempty reason as rejection. `resume` remains the wire field used by the normal Enable controls action and legacy resume clients. This checks prerequisites only; ownership/enabling/manual mode still apply. Manual enabling can be available with no actuators, allowing monitoring/conversation while unavailable outputs remain blocked.
+
+Additional readiness fields:
+
+| Entry | Fields and meaning |
+| --- | --- |
+| `drive` | `limited:boolean`; `max_speed:number` (normally 0.6, at most 0.2 when limited); `max_hold_ms:2000|null` (fixed limited-press cap or no extra press cap); `requires_release:boolean` (drive stop/release required before another press after limited input or hold expiry). |
+| `pump` | `cooldown_ms:number`, nonnegative remaining manual cooldown. `available:false` also covers an active burst; `cooldown_ms:0` alone does not authorize a burst. |
+
+All drive modes retain the separate 400 ms input timeout. The limited hold limit is not a promise of exactly two seconds of motor motion.
 
 `calibration` contains `motion_calibrated:boolean` (legacy, no longer a movement gate), `auto_calibrated:boolean` (advanced override), `motion_profile_configured:true`, `ir_blocked_value:0|1|null`, `simulation_allowed:boolean`. Normal environment loading uses the built-in active-low IR value 0. Runtime operating confirmation is in `readiness`, not written back as a calibration file.
 
@@ -389,6 +405,7 @@ Values below describe current defaults, not remotely writable settings.
 | --- | --- |
 | Browser → Backend heartbeat | UI sends every 1 s; owner timeout 3 s. |
 | Browser held drive | Refresh 100 ms; stop on release/cancel/blur/hidden/authority loss. |
+| Manual drive with missing/unverified IR | At most speed 0.2 and a fixed 2 s per press; input timeout or hold expiry requires release. Repeated drive refresh cannot extend the cap. Verified known hazards still block/stop; auto/chat do not use this allowance. |
 | Backend control timer | About 50 ms per iteration; deadlines are checked, not hard real-time scheduling. |
 | Backend → Pi | Heartbeat about every 200 ms; drive refresh about every 100 ms while its input lease is live. |
 | Pi output limits | Control silence 1 s; independent drive lease 400 ms; pump maximum on 1 s. Heartbeat cannot extend the drive/pump limits. |
@@ -427,7 +444,7 @@ Use this checklist when replacing a component without changing the others:
 1. Keep cookie/bearer/origin boundaries separate. Never pass a provider key to browser code or place a Pi actuator command directly in LLM output handling.
 2. Preserve `/api/v1/ws`, `hello.protocol_version:1`, new per-connection session IDs, strict envelopes and monotonically increasing sequences. Keep new request IDs even after rejected messages; never replay queued movement after reconnect.
 3. Preserve semantic browser directions, relative face units, Pi left/right sign mapping and shared speed. A UI cannot send absolute servo targets, differential speed magnitudes or unbounded durations through this protocol.
-4. Preserve single-owner arbitration, explicit claim/resume, any-viewer global stop, independent Pi watchdogs, input deadlines, cooldowns and stale-data handling. Readiness is not ownership. Successful send is not physical success.
+4. Preserve single-owner arbitration, explicit enable and legacy claim/resume, any-viewer global stop, independent Pi watchdogs, input deadlines, cooldowns and stale-data handling. Preserve the fixed deadline and release requirement for limited manual driving; repeated input must not extend it. Auto/chat keep strict IR checks. Readiness is not ownership. Successful send is not physical success.
 5. Preserve modern per-component availability and null/invalid values. Do not convert missing sensors into clear readings, absent servo angles into 90°, or unavailable pump state into confirmed off.
 6. Match ML session/model/stream/capture identity, increasing frame sequences, normalized classes/boxes and age basis. New detector IDs must fit the backend's 96-character identifier limit as well as the ML registry rules. Maintain safe stop-and-replace lifecycle.
 7. Keep chat proposals distinct from text. Recheck the original user's one-step request, exact proposal fields, identity, ≤1 s lifetime, consumed IDs, current generation and bounds. Ordinary conversation cannot invent movement or pump actions.

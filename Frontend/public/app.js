@@ -1,4 +1,4 @@
-import { HoldDrive, containedRectangle, validBox, controlAvailability } from './control.js';
+import { HoldDrive, DriveKeys, driveSpeed, containedRectangle, validBox, controlAvailability } from './control.js';
 import { PiVideo } from './video.js';
 
 const $ = id => document.getElementById(id);
@@ -6,6 +6,7 @@ let socket, sessionId, state = {}, sequence = 0, reconnectTimer, heartbeatTimer,
 let videoSource, detections = null, detectionsAt = 0, videoConnected = false, toastTimer;
 let lastReceived = 0, retryCount = 0, previousMode = null, pendingChat = null;
 let authenticationRevision = 0;
+let preferredDriveSpeed = Number($('speed').value);
 const pending = new Map();
 const pendingSpeech = new Map();
 const connected = () => socket?.readyState === WebSocket.OPEN && !!sessionId;
@@ -36,9 +37,10 @@ function send(data, track = false) {
     return requestId;
   } catch { return null; }
 }
-const drive = new HoldDrive({ send, canDrive, speed: () => Number($('speed').value), onChange: direction => {
+const drive = new HoldDrive({ send, canDrive, speed: () => driveSpeed(preferredDriveSpeed, state.readiness?.drive), onChange: direction => {
   document.querySelectorAll('[data-drive]').forEach(button => button.classList.toggle('is-held', button.dataset.drive === direction));
 }});
+const keyboard = new DriveKeys({ drive, canDrive, onStop: () => stopRobot(), onBlocked: () => notify(controls().reasons.drive) });
 const video = new PiVideo($('camera'), (status, message) => {
   videoConnected = status === 'connected';
   badge('video-badge', videoConnected ? 'Video live' : status === 'connecting' ? 'Connecting' : 'Video offline', videoConnected ? 'good' : status === 'error' ? 'error' : 'offline');
@@ -84,10 +86,10 @@ function renderModels(models) {
   if ([...$('model-select').options].some(o => o.value === selected)) $('model-select').value = selected;
 }
 function updateState(next) {
-  if (previousMode && next.mode !== previousMode) drive.stop();
+  if (previousMode && next.mode !== previousMode) keyboard.reset();
   previousMode = next.mode;
   state = next;
-  if (!canDrive()) drive.stop();
+  if (!canDrive()) keyboard.reset();
   render();
 }
 function render() {
@@ -100,26 +102,34 @@ function render() {
   badge('pi-badge', piFresh ? (simulated ? 'Pi simulated' : 'Pi connected') : pi.connected ? 'Pi status stale' : 'Pi offline', piFresh ? (simulated ? 'warn' : 'good') : pi.connected ? 'warn' : 'offline');
   badge('ml-badge', ml.ready ? 'ML ready' : ml.connected ? 'ML connected' : 'ML offline', ml.ready ? 'good' : ml.connected ? 'warn' : 'offline');
   $('stop').disabled = !online;
-  $('claim').disabled = !online || owned || !!state.owner_session_id;
-  $('resume').disabled = !available.resume;
-  $('resume').title = state.mode === 'auto' ? readiness.auto?.reason || '' : readiness.resume?.reason || '';
+  $('enable').disabled = !available.enable;
+  $('enable').title = available.enableReason;
+  $('enable').textContent = owned && !state.stopped ? 'Controls enabled' : 'Enable controls';
   $('release').disabled = !owned;
-  $('manual-mode').disabled = !owned;
+  $('release').title = owned ? 'Stop the robot and let another browser enable controls.' : 'This browser does not control the robot.';
+  $('manual-mode').disabled = !available.manualMode;
+  $('manual-mode').title = available.manualMode ? 'Select manual operation. Click Enable controls afterwards.' : available.enableReason;
   $('auto-mode').disabled = !owned || !piFresh;
   $('manual-mode').setAttribute('aria-pressed', state.mode !== 'auto');
   $('auto-mode').setAttribute('aria-pressed', state.mode === 'auto');
   for (const [kind, enabled] of [['drive', available.drive], ['servo', available.servo]]) {
     document.querySelectorAll(`[data-${kind}]`).forEach(button => {
-      button.disabled = !enabled; button.title = readiness[kind]?.reason || '';
+      button.disabled = !enabled; button.title = available.reasons[kind];
     });
   }
   $('pump-on').disabled = !available.pump;
-  $('pump-on').title = readiness.pump?.reason || '';
+  $('pump-on').title = available.reasons.pump;
   $('pump-off').disabled = !owned || !available.fresh || !pi.hardware?.pump?.available;
+  const limitedDrive = readiness.drive?.limited === true;
+  $('speed').max = String(limitedDrive ? readiness.drive.max_speed ?? 0.2 : 0.6);
+  $('speed').value = String(driveSpeed(preferredDriveSpeed, readiness.drive));
+  $('speed-value').textContent = `${Math.round(Number($('speed').value) * 100)}%`;
+  $('drive-note').textContent = limitedDrive ? readiness.drive.reason || 'IR inputs unverified: manual driving is limited to short, slow tests.' : available.drive ? 'Hold WASD, arrow keys or a direction button to move.' : available.reasons.drive;
+  $('pump-note').textContent = available.pump ? 'One short burst per click.' : available.reasons.pump;
   $('alignment-check').disabled = !owned || !state.stopped || !readiness.servo?.available || !readiness.pump?.available || readiness.alignment_confirmed === true;
   $('alignment-check').textContent = readiness.alignment_confirmed ? 'Operating check recorded' : 'Confirm camera / nozzle check';
   $('readiness-summary').textContent = ['drive', 'servo', 'pump', 'auto'].map(name =>
-    `${name === 'servo' ? 'Face' : name[0].toUpperCase() + name.slice(1)}: ${readiness[name]?.available ? 'ready' : readiness[name]?.reason || 'waiting for Pi status'}`).join('\n');
+    `${name === 'servo' ? 'Face' : name[0].toUpperCase() + name.slice(1)}: ${readiness[name]?.available ? readiness[name]?.reason || 'ready' : readiness[name]?.reason || 'waiting for Pi status'}`).join('\n');
   $('vision-start').disabled = !owned || !ml.connected || !$('model-select').value;
   $('vision-stop').disabled = !owned || !ml.connected;
   $('model-select').disabled = !owned || !state.stopped;
@@ -127,10 +137,14 @@ function render() {
   $('chat-send').disabled = !online || !!pendingChat;
   $('speech-stop').disabled = !online;
   $('shutdown').disabled = !owned;
-  $('ownership-label').textContent = owned ? 'Your controls' : state.owner_session_id ? 'Another operator' : 'Viewing';
-  let summary = !online ? 'Backend offline. Controls are unavailable.' : !pi.connected ? 'Pi offline. Chat and video can connect independently.' : owned ? state.stopped ? 'You have control. Robo is stopped — press Resume when ready.' : state.mode === 'auto' ? 'Auto is active. Stop robot is always available.' : 'You have control. Hold a direction to move.' : state.owner_session_id ? 'Another operator has control. You can watch, chat or stop the robot.' : 'Viewing only. Take control to operate Robo.';
-  if (online && piFresh && !['drive', 'servo', 'pump'].some(name => readiness[name]?.available)) summary = 'Pi is connected. Hardware controls are unavailable; see the component reasons below. Chat and video can work independently.';
-  else if (owned && !state.stopped && state.mode === 'manual' && !available.drive) summary = 'Your available face and pump controls are ready. Driving is paused until its inputs are ready.';
+  $('ownership-label').textContent = owned ? state.stopped ? 'Stopped' : 'Controls enabled' : state.owner_session_id ? 'Another operator' : 'Viewing';
+  let summary = available.gateReason || 'Controls enabled. Hold a direction to move; release it to stop.';
+  if (online && available.fresh && owned && !state.stopped && state.mode === 'auto') summary = 'Auto is active. Stop robot is always available.';
+  else if (!available.gateReason) {
+    const issues = ['drive', 'servo', 'pump'].filter(name => !available[name]).map(name => `${name === 'servo' ? 'Face' : name[0].toUpperCase() + name.slice(1)}: ${available.reasons[name]}`);
+    if (issues.length) summary += ` ${issues.join(' ')}`;
+    if (limitedDrive) summary += ` ${$('drive-note').textContent}`;
+  } else if ((state.stopped || !owned) && online && available.fresh && !available.enable && (!state.owner_session_id || owned)) summary = available.enableReason;
   if (simulated) summary = `SIMULATION · No physical robot. ${summary}`;
   $('control-summary').textContent = summary;
   $('hardware-issue').textContent = Object.entries(pi.hardware || {}).filter(([name, part]) => name !== 'sensors' && part.available === false).map(([name, part]) => `${name}: ${part.reason || part.state}`).join(' · ');
@@ -179,6 +193,7 @@ function renderSensors(fresh) {
 function connectSocket() {
   if (!signedIn) return;
   clearTimeout(reconnectTimer);
+  keyboard.reset();
   socket?.close();
   sessionId = null;
   const next = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/ws`);
@@ -191,10 +206,10 @@ function connectSocket() {
     try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === 'hello') {
       sessionId = message.session_id; sequence = 0; retryCount = 0;
-      activity('Backend connected. Control is not resumed automatically.');
+      activity('Backend connected. Click Enable controls when ready.');
       clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
-        if (Date.now() - lastReceived > 6000) { drive.stop(); next.close(); return; }
+        if (Date.now() - lastReceived > 6000) { keyboard.reset(); next.close(); return; }
         send({ type: 'heartbeat' });
         for (const [id, item] of pending) if (Date.now() - item.created > 60_000) pending.delete(id);
         if (pendingChat && Date.now() - pendingChat.created > 60_000) finishChat('Robo did not respond in time. You can try again.', 'timeout');
@@ -234,7 +249,7 @@ function connectSocket() {
   };
   next.onclose = () => {
     if (next !== socket) return;
-    drive.stop(); sessionId = null; clearInterval(heartbeatTimer); detections = null;
+    keyboard.reset(); sessionId = null; clearInterval(heartbeatTimer); detections = null;
     if (pendingChat) finishChat('Connection interrupted. Your message will not be replayed.', 'interrupted');
     for (const reply of pendingSpeech.values()) updateChatStatus(reply.article, reply.action, 'connection_lost');
     pendingSpeech.clear();
@@ -254,7 +269,7 @@ async function signIn() {
 }
 async function signOut(request = true) {
   authenticationRevision += 1;
-  drive.stop(); send({ type: 'control', command: 'release' });
+  keyboard.reset(); send({ type: 'control', command: 'release' });
   signedIn = false; clearTimeout(reconnectTimer); clearInterval(heartbeatTimer);
   socket?.close(); sessionId = null; video.stop(); videoSource = null; state = {}; pending.clear();
   pendingChat = null; pendingSpeech.clear(); $('chat-input').value = ''; $('chat-history').replaceChildren();
@@ -275,24 +290,23 @@ $('login-form').addEventListener('submit', async event => {
   finally { $('login-button').disabled = false; }
 });
 $('logout').addEventListener('click', () => signOut());
-$('claim').addEventListener('click', () => send({ type: 'control', command: 'claim' }, true));
-$('resume').addEventListener('click', () => send({ type: 'control', command: 'resume' }, true));
+$('enable').addEventListener('click', () => { keyboard.reset(); send({ type: 'control', command: 'enable' }, true); });
 $('alignment-check').addEventListener('click', () => {
   if (window.confirm('Confirm you have checked that the camera and nozzle move together in the shown direction, and that a short stationary water spray is safe in the current area. This records your operating check; it does not automatically calibrate hardware.')) {
     send({ type: 'readiness', command: 'confirm_alignment' }, true);
   }
 });
-$('release').addEventListener('click', () => { drive.stop(); send({ type: 'control', command: 'release' }, true); });
-const stopRobot = () => { drive.stop(); send({ type: 'system', command: 'stop' }, true); };
+$('release').addEventListener('click', () => { keyboard.reset(); send({ type: 'control', command: 'release' }, true); });
+const stopRobot = () => { keyboard.reset(); send({ type: 'system', command: 'stop' }, true); };
 $('stop').addEventListener('click', stopRobot);
-for (const mode of ['manual', 'auto']) $(`${mode}-mode`).addEventListener('click', () => { drive.stop(); send({ type: 'mode', value: mode }, true); });
-$('speed').addEventListener('input', () => { $('speed-value').textContent = `${Math.round(Number($('speed').value) * 100)}%`; });
+for (const mode of ['manual', 'auto']) $(`${mode}-mode`).addEventListener('click', () => { keyboard.reset(); send({ type: 'mode', value: mode }, true); });
+$('speed').addEventListener('input', () => { preferredDriveSpeed = Number($('speed').value); $('speed-value').textContent = `${Math.round(preferredDriveSpeed * 100)}%`; });
 for (const button of document.querySelectorAll('[data-drive]')) {
   button.addEventListener('pointerdown', event => { if (event.button !== 0) return; event.preventDefault(); if (drive.start(button.dataset.drive)) button.setPointerCapture(event.pointerId); });
-  for (const kind of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(kind, () => drive.stop());
+  for (const kind of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(kind, () => keyboard.reset());
   button.addEventListener('contextmenu', event => event.preventDefault());
-  button.addEventListener('keydown', event => { if (event.code === 'Space' || event.code === 'Enter') { event.preventDefault(); drive.start(button.dataset.drive); } });
-  button.addEventListener('keyup', event => { if (event.code === 'Space' || event.code === 'Enter') { event.preventDefault(); drive.stop(); } });
+  button.addEventListener('keydown', event => keyboard.buttonDown(event, button.dataset.drive));
+  button.addEventListener('keyup', event => keyboard.buttonUp(event));
 }
 for (const button of document.querySelectorAll('[data-servo]')) button.addEventListener('click', () => send({ type: 'servo', direction: button.dataset.servo, degrees: 5 }, true));
 $('pump-on').addEventListener('click', () => send({ type: 'pump', on: true, duration_ms: 800 }, true));
@@ -306,17 +320,11 @@ $('speech-stop').addEventListener('click', () => send({ type: 'speech', command:
 $('shutdown').addEventListener('click', () => {
   if (window.confirm('Stop all robot actions and shut down the Pi server script? You will need to start the script on the Pi again.')) send({ type: 'system', command: 'shutdown' }, true);
 });
-const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' };
-let heldKey = null;
-window.addEventListener('keydown', event => {
-  if (event.code === 'Escape') { event.preventDefault(); heldKey = null; stopRobot(); return; }
-  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.target.closest('input,textarea,select,[contenteditable=true]')) return;
-  if (keys[event.code] && canDrive()) { event.preventDefault(); heldKey = event.code; drive.start(keys[event.code]); }
-});
-window.addEventListener('keyup', event => { if (event.code === heldKey) { event.preventDefault(); heldKey = null; drive.stop(); } });
-window.addEventListener('blur', () => { heldKey = null; drive.stop(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { heldKey = null; drive.stop(); } });
-window.addEventListener('pagehide', () => { drive.stop(); send({ type: 'control', command: 'release' }); video.stop(false); });
+window.addEventListener('keydown', event => keyboard.down(event));
+window.addEventListener('keyup', event => keyboard.up(event));
+window.addEventListener('blur', () => keyboard.reset());
+document.addEventListener('visibilitychange', () => { if (document.hidden) keyboard.reset(); });
+window.addEventListener('pagehide', () => { keyboard.reset(); send({ type: 'control', command: 'release' }); video.stop(false); });
 
 function appendChat(author, text, status) {
   const article = document.createElement('article'); article.className = `chat-message ${author === 'You' ? 'user' : 'robot'}`;

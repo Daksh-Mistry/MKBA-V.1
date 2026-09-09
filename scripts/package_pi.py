@@ -15,6 +15,10 @@ def package() -> Path:
     destination = ROOT / "dist" / "pi-ready.tar.gz"
     destination.parent.mkdir(exist_ok=True)
     files = [ROOT / "README.md"]
+    # Include the complete written reference even though computer service code
+    # stays in the full checkout rather than being deployed to the Pi.
+    files.extend(ROOT / component / "README.md" for component in
+                 ("Backend", "Frontend", "ML", "Backend/web"))
     files.extend(path for path in (ROOT / "PI").rglob("*")
                  if path.is_file() and not path.is_symlink()
                  and not any(part in EXCLUDED or part.startswith(".") for part in path.relative_to(ROOT).parts)

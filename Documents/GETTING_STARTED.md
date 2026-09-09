@@ -4,6 +4,17 @@
 
 This guide starts with a project folder on a Windows computer and Raspberry Pi OS Bookworm 64-bit on the Pi. You do not need to know Python, install Node manually, edit service tokens, or provide an LLM key for normal startup.
 
+## Contents
+
+- [1. Know which machine does what](#1-know-which-machine-does-what)
+- [2. Put the files in the right place](#2-put-the-files-in-the-right-place)
+- [3. Start the Pi](#3-start-the-pi)
+- [4. Start the computer](#4-start-the-computer)
+- [5. Try it without moving hardware](#5-try-it-without-moving-hardware)
+- [6. Optional LLM key later](#6-optional-llm-key-later)
+- [7. Stop and restart](#7-stop-and-restart)
+- [Optional computer-only demonstration](#optional-computer-only-demonstration)
+
 ## 1. Know which machine does what
 
 | Machine | Runs | What you start |
@@ -42,7 +53,7 @@ tar -xzf ~/pi-ready.tar.gz -C ~/robo
 cd ~/robo/PI
 ```
 
-The bundle contains Pi source and documentation. It excludes private `.env` files, Windows/Linux environments, generated binaries and caches. If copying the folder instead, also exclude `.venv`, `bin`, caches and your computer's private settings. Never copy the Windows `.venv` to Linux.
+The bundle contains Pi source and the complete written documentation. Links to computer-service source require the full checkout. The bundle excludes private `.env` files, Windows/Linux environments, generated binaries and caches. If copying the folder instead, also exclude `.venv`, `bin`, caches and your computer's private settings. Never copy the Windows `.venv` to Linux.
 
 ## 3. Start the Pi
 
@@ -92,7 +103,7 @@ Local sign-in is automatic. The computer discovers a reachable Robo Pi, initiall
 Expected first screen:
 
 - Backend, Pi and ML connection labels, once each service is reachable.
-- **Viewing only** and **Stopped** until you deliberately take control and resume.
+- **Viewing only** and **Stopped** until you click **Enable controls**. This combines the old Take control and Resume steps; **Disable controls** stops actions and releases ownership.
 - Individual hardware/readiness information; unavailable components remain disabled.
 - Local chat works even with the API key blank.
 - Video can be offline while all JSON services are connected.
@@ -124,7 +135,7 @@ Custom providers, model names, precedence and offline servers are documented in 
 | Ctrl+C in the Pi API launcher terminal | Stops the API and discovery; the independently launched camera continues. |
 | Ctrl+C in the Pi camera launcher terminal | Stops camera streaming; the API continues. |
 | Backend/Pi `system: shutdown` command | Exits the Pi API script/launcher, not the Pi OS or independent camera. This is a protocol command; see the API guides. |
-| Restarting the computer and Pi API launchers | Reconnects services with actions stopped; ownership/resume must be renewed. Start the camera separately if needed. |
+| Restarting the computer and Pi API launchers | Reconnects services with actions stopped; click Enable controls again when ready. Start the camera separately if needed. |
 
 Use the OS's normal shutdown procedure before disconnecting Pi power. The API `shutdown` command is not an OS power-off command.
 

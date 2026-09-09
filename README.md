@@ -18,13 +18,15 @@ Leave the optional root `CHAT_API_KEY` blank for now. Basic local chat answers s
 
 ## What the system does
 
-- Manual drive, relative face movement, timed pump bursts and Stop.
+- Enable controls in one click, manual drive with WASD/arrow keys, relative face movement, timed pump bursts and Stop.
 - Direct Pi video to browsers and ML, plus approximate detection overlays.
 - Pretrained fire/smoke detection and **supervised stationary** scan/aim/spray/reassess auto mode.
 - Basic keyless chat, optional LLM conversation, bounded chat gestures and Pi speech.
 - Partial-hardware status, ownership, data freshness checks and independent timeouts.
 
 Auto does not navigate toward fire or measure distance. Software-reported output is not physical feedback. Follow the [operating guide](Documents/OPERATING_GUIDE.md) and [hardware checks](Documents/HARDWARE.md) before actuating the robot.
+
+Missing/unverified IR permits short manual motor checks at up to 20% speed for two seconds per press; release before retrying. Known verified obstacles still block movement. Auto and chat movement require verified clear IR. The pump button sends an 800 ms burst and displays its three-second cooldown.
 
 ## Documentation
 
@@ -55,6 +57,6 @@ Build the Pi deployment bundle after computer setup:
 .venv\Scripts\python.exe scripts\package_pi.py
 ```
 
-It creates `dist/pi-ready.tar.gz` with Pi source and documentation, excluding private settings, installed environments and binaries. Copying source on the computer alone does not update a running Pi.
+It creates `dist/pi-ready.tar.gz` with Pi source and the complete written documentation, excluding private settings, installed environments and binaries. Links to computer-service source files require the full checkout; that code is not deployed in the Pi bundle. Copying source on the computer alone does not update a running Pi.
 
 Dated test results and physical verification limits are recorded in [Testing](Documents/TESTING_AND_TROUBLESHOOTING.md) and [Hardware](Documents/HARDWARE.md).

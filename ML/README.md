@@ -4,6 +4,20 @@ ML runs on the **computer**, alongside Backend and Frontend. It contains one loc
 
 Use [Getting started](../Documents/GETTING_STARTED.md) for the complete project, [Operating guide](../Documents/OPERATING_GUIDE.md) for controls, [ML API](../Documents/API_ML.md) for exact messages, and the [documentation index](../Documents/README.md) for all current guides.
 
+## Contents
+
+- [Start and check ML](#start-and-check-ml)
+- [Keyless chat and the optional API key](#keyless-chat-and-the-optional-api-key)
+- [Gestures and auto mode](#gestures-and-auto-mode)
+- [Runtime flow and processes](#runtime-flow-and-processes)
+- [Module responsibilities](#module-responsibilities)
+- [Full ML configuration reference](#full-ml-configuration-reference)
+- [Pretrained artifact: identity versus accuracy](#pretrained-artifact-identity-versus-accuracy)
+- [Recipe: swap compatible weights](#recipe-swap-compatible-weights)
+- [Recipe: another model family, training or export runtime](#recipe-another-model-family-training-or-export-runtime)
+- [Recipe: replace the whole ML server](#recipe-replace-the-whole-ml-server)
+- [Tests and fault isolation](#tests-and-fault-isolation)
+
 ## Start and check ML
 
 Double-click [START_ROBO.cmd](../START_ROBO.cmd) for normal Windows x64 operation. It prepares private runtimes and CPU dependencies, verifies/downloads the pinned model, generates matching service credentials, finds the Pi and starts all three computer servers. Python, Node and an LLM key do not require manual configuration first. First installation needs internet; local inference/basic chat do not need a cloud API afterward.

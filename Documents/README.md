@@ -8,7 +8,7 @@ This is the canonical documentation for the current source. It replaces the old 
 
 Read these in order:
 
-1. [Getting started](GETTING_STARTED.md): each machine's role, fresh setup, file transfer, one-command startup and optional key.
+1. [Getting started](GETTING_STARTED.md): each machine's role, fresh setup, file transfer, automatic computer startup, separate Pi API/camera launchers and optional key.
 2. [Operating guide](OPERATING_GUIDE.md): ownership, Resume/Stop, controls, direct video, detection, supervised auto, chat and speaker.
 3. [Hardware](HARDWARE.md): pin maps, power/interface distinctions, staged physical checks and recorded bench evidence.
 4. [Testing and troubleshooting](TESTING_AND_TROUBLESHOOTING.md): symptoms, logs, diagnostics, test commands and what has actually been verified.

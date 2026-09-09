@@ -76,30 +76,37 @@ class PartialHardwareTests(unittest.IsolatedAsyncioTestCase):
         await self.robot.tick()
         self.assertIn({'type': 'pump', 'on': False}, self.pi.sent)
 
-    async def test_pullup_alone_does_not_enable_motion_and_all_channels_need_signal_evidence(self):
+    async def test_pullup_allows_only_limited_manual_test_until_all_signals_verified(self):
         for _ in range(3):
             await self.robot.on_pi(partial_status())
         await self.resume()
-        self.assertFalse(self.robot.readiness()['drive']['available'])
-        self.assertEqual((await self.send('drive', direction='forward'))['status'], 'rejected')
+        self.assertTrue(self.robot.readiness()['drive']['available'])
+        self.assertTrue(self.robot.readiness()['drive']['limited'])
+        with self.assertRaises(ValueError):
+            self.robot._motion_ready()  # Chat movement still requires real signal evidence.
+        self.assertEqual((await self.send('drive', direction='forward', speed=0.6))['status'], 'sent_to_pi')
+        self.assertEqual(self.pi.sent[-1]['speed'], 0.2)
+        await self.send('drive', direction='stop')
         await self.robot.on_pi(partial_status(ir=[0, 0, 0, 1]))
         await self.robot.on_pi(partial_status())
         await self.robot.on_pi(partial_status())
-        self.assertFalse(self.robot.readiness()['drive']['available'])
+        self.assertTrue(self.robot.readiness()['drive']['limited'])
         await self.robot.on_pi(partial_status(ir=[1, 1, 1, 0]))
         await self.robot.on_pi(partial_status())
         await self.robot.on_pi(partial_status())
         self.assertTrue(self.robot.readiness()['drive']['available'])
+        self.assertFalse(self.robot.readiness()['drive']['limited'])
         self.assertEqual((await self.send('drive', direction='forward'))['status'], 'sent_to_pi')
 
-    async def test_pi_boot_signal_history_is_retained_but_invalid_channels_block(self):
+    async def test_pi_boot_signal_history_is_retained_but_invalid_channels_limit_manual_drive(self):
         await self.robot.on_pi(partial_status(changes=2))
         await self.robot.on_pi(partial_status(changes=2))
         self.assertTrue(self.robot.readiness()['drive']['available'])
         data = partial_status(changes=2)
         data['hardware']['sensors']['channels']['ir_array'][2]['available'] = False
         await self.robot.on_pi(data)
-        self.assertFalse(self.robot.readiness()['drive']['available'])
+        self.assertTrue(self.robot.readiness()['drive']['available'])
+        self.assertTrue(self.robot.readiness()['drive']['limited'])
         self.assertEqual(self.robot.snapshot()['sensors']['raw']['ir_array'][2], -1)
 
     async def test_isolated_failed_part_stops_then_healthy_part_can_resume(self):

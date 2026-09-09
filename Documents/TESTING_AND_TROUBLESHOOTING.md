@@ -2,6 +2,15 @@
 
 [Documentation index](README.md) | [Setup](GETTING_STARTED.md) | [Hardware checks](HARDWARE.md)
 
+## Contents
+
+- [Start with the failing boundary](#start-with-the-failing-boundary)
+- [Read-only diagnosis](#read-only-diagnosis)
+- [Automated test commands](#automated-test-commands)
+- [What each test module covers](#what-each-test-module-covers)
+- [Recorded verification baseline](#recorded-verification-baseline)
+- [Reporting a problem](#reporting-a-problem)
+
 ## Start with the failing boundary
 
 **2026-09-09 launcher/logging update:** the current source starts the Pi API/discovery with `start_robo.sh` and camera streaming independently with `start_camera.sh`. **78 distinct Pi tests passed**: 51 protocol/runtime/partial-hardware, 3 logging, 15 split-launcher and 9 setup checks. These used local test doubles, not live actuation. The computer UI at `http://localhost:3001` showed Backend and ML connected; frontend/backend/ML HTTP checks returned 200 and the pretrained fire-model artifact was available. Pi offline was expected because the user had intentionally powered it off pending the new bundle. The new Pi code has not been run on that Pi.
@@ -17,7 +26,9 @@
 | Pi reports controller busy | Another `/ws` client is connected | Pi allows one controller. Stop the previous normal backend/test controller before direct bench work. |
 | Components unavailable | Pi `/status`, `hardware` diagnostics | Check provider/interface setup, enabled components and physical power/wiring separately. API may still run normally. |
 | IR "Input unverified" | Per-channel signal-change evidence | Perform trigger/release bench checks; a steady readable GPIO alone is insufficient. Do not replace unknown with clear. |
-| Resume/action denied | UI control-availability reason and command result | Ownership, stopped state, mode, hardware, data freshness and alignment are separate gates. |
+| Enable/action denied | UI control-availability reason and command result | Enable controls combines ownership and resuming; another owner, stale/disconnected Pi or a required component can still block it. Auto additionally requires its full IR/vision/alignment checks. |
+| Manual motor test stops after two seconds | Limited-drive note and release state | Expected with missing/unverified IR: output is capped at 20% and two seconds per press. Release before a new press; repeated held updates cannot extend it. An input timeout also requires release. |
+| Pump button temporarily disabled | Active burst or displayed cooldown | Normal UI bursts last 800 ms, followed by three seconds of cooldown. Available servo controls remain independent. |
 | Camera signaling 404 | Separate `start_camera.sh` terminal and direct `/cam` viewer | The API does not start video. Start the camera launcher, then check camera detection/config/path. |
 | WHEP signaling succeeds but no picture | WebRTC media reachability, Pi UDP 8189, browser state | HTTP success is not media delivery. Browser and Pi must be able to exchange ICE/media traffic. |
 | Video plays, ML fails | `logs/ml.log`, ML session/model/RTSP status | Browser WebRTC and ML RTSP are independent paths. Inspect weights/hash/runtime and RTSP decode. |
@@ -126,8 +137,10 @@ For an optional non-browser WebRTC decode diagnostic, install `aiortc` in a deve
 | `ML/tests/test_vision.py`, `test_download.py` | Capture/adapter/session lifecycle, normalized boxes, errors/cancellation, artifact identity/atomic writes and process-held installer locks. |
 | `Backend/tests/test_api.py`, `test_controller.py` | Private API, operator ownership, request validation, action limits, expiry, chat/speech and fault behavior. |
 | `Backend/tests/test_auto_policy.py`, `test_partial_hardware.py` | Stationary policy transitions, unavailable/null components, live IR evidence and alignment gating. |
+| `Backend/tests/test_manual_controls.py` | Atomic enable, competing owners, limited manual power/deadlines, release requirement, known obstacles, pump cooldown, Manual recovery and strict auto/chat prerequisites. |
 | `Frontend/tests/frontend.test.mjs` | HTTP sessions/local login/origins, private proxy, WebSocket framing and relevant control behavior. |
 | `Frontend/tests/readiness.test.mjs` | Component-driven UI availability and related client behavior. |
+| `Frontend/tests/keyboard.test.mjs` | WASD/arrow input, repeat handling, editable fields, blur/reset behavior and readiness-based speed limits. |
 | `PI/tests/test_protocol.py`, `test_runtime.py`, `test_partial_hardware.py` | Pi validation, JSON protocol, watchdog/stop/shutdown, speech and unavailable drivers/sensors with doubles. |
 | `PI/tests/test_setup.py`, `test_launcher.py` | Real Bash with command/OS doubles for setup, package repair, verified streamer replacement and process cleanup. |
 | `PI/tests/test_logging.py` | API command/lifecycle log behavior, including reduced repeated drive logging and quiet heartbeat traffic. |
@@ -157,6 +170,14 @@ The automatic Windows environment was actually installed with managed Python 3.1
 The shell tests used OS/package doubles. They do not prove a fresh Bookworm installation on arbitrary hardware. No live cloud chat API was called. Synthetic inference establishes the processing path, not detection accuracy. Hardware command telemetry and recent physical bench observations are recorded separately in [Hardware](HARDWARE.md).
 
 At the last recorded computer-stack check, real Pi API 2.3 telemetry reached the UI, while its camera endpoint returned 404/no stream. A later direct bench session stopped the computer backend to obtain Pi control. These are dated observations, not the current process state on every reader's machine. Updated source on the computer must still be deployed to the Pi to change its launcher behavior.
+
+### Manual controls update: 2026-09-09
+
+The updated Backend suite passed **73 tests**, and Frontend passed **24 tests**. The isolated full-stack run passed **16 checks**, including the new single Enable controls request and confirmation that enabling alone sends no drive or pump command. These integration checks used a simulated Pi. The final late-input deadline guard was then covered by the passing Backend suite.
+
+The computer services were restarted with the update. Live Pi telemetry reported motors, servos and pump available, with IR inputs unverified. Backend readiness correctly allowed manual drive at at most 20% power for two seconds per press and reported the pump available. The browser showed Backend, Pi and ML connected, the new Enable/Disable controls buttons, and clear instructions to enable first. No actuator motion was commanded in this verification. Automatic approval review blocked clicking Enable controls on the live robot; that final browser interaction remains for the user unless separately approved.
+
+These results verify software behavior and live readiness, not physical motor direction, pump flow or sensor performance. This controls update changes the computer Backend and Frontend; it requires no new Pi source deployment.
 
 ## Reporting a problem
 

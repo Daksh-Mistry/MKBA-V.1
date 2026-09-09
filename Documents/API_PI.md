@@ -4,6 +4,15 @@ This is the contract implemented by [PI/server.py](../PI/server.py), [PI/api/web
 
 The Pi executes hardware commands and reports observations. The computer backend owns decisions, user-control arbitration, sensor processing and auto policy. ML and frontend read video directly from the Pi. See [Architecture](ARCHITECTURE.md), [Backend/frontend API](API_BACKEND_FRONTEND.md) and [ML API](API_ML.md).
 
+## Contents
+
+- [Endpoints and access](#endpoints-and-access)
+- [WebSocket connection lifecycle](#websocket-connection-lifecycle)
+- [Backend → Pi commands](#backend--pi-commands)
+- [Pi → backend messages](#pi--backend-messages)
+- [Speech HTTP contract](#speech-http-contract)
+- [Video is a separate interface](#video-is-a-separate-interface)
+
 ## Endpoints and access
 
 The default API base is `http://PI_HOST:8000`, where `PI_HOST` means the Pi's reachable hostname/address. Configuration binds the API to `0.0.0.0:8000` unless overridden.

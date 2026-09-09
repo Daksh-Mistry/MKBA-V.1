@@ -28,6 +28,46 @@ export class HoldDrive {
   }
 }
 
+/** Keyboard movement always needs a fresh press; cancelled holds never replay. */
+export class DriveKeys {
+  constructor({ drive, canDrive, onStop, onBlocked = () => {} }) {
+    Object.assign(this, { drive, canDrive, onStop, onBlocked });
+    this.heldKey = null;
+  }
+  down(event) {
+    if (event.code === 'Escape') {
+      event.preventDefault(); this.reset(); this.onStop(); return;
+    }
+    const direction = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'backward', ArrowDown: 'backward',
+      KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' }[event.code];
+    if (!direction || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    const field = event.target?.closest?.('input,textarea,select,[contenteditable=true]');
+    // WASD still works after adjusting speed; arrows retain the slider's normal behavior.
+    if (field && (field.type !== 'range' || event.code.startsWith('Arrow'))) return;
+    event.preventDefault();
+    if (!this.canDrive()) { this.onBlocked(); return; }
+    if (this.drive.start(direction)) this.heldKey = event.code;
+  }
+  up(event) {
+    if (event.code === this.heldKey) { event.preventDefault(); this.reset(); }
+  }
+  buttonDown(event, direction) {
+    if (!['Space', 'Enter'].includes(event.code)) return;
+    event.preventDefault();
+    if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) this.drive.start(direction);
+  }
+  buttonUp(event) {
+    if (['Space', 'Enter'].includes(event.code)) { event.preventDefault(); this.reset(); }
+  }
+  reset() { this.heldKey = null; this.drive.stop(); }
+}
+
+export function driveSpeed(value, readiness = {}) {
+  const requested = Number(value);
+  const maximum = readiness.limited && Number.isFinite(readiness.max_speed) ? readiness.max_speed : 0.6;
+  return Math.max(0, Math.min(Number.isFinite(requested) ? requested : 0, maximum));
+}
+
 export function containedRectangle(containerWidth, containerHeight, sourceWidth, sourceHeight) {
   if (![containerWidth, containerHeight, sourceWidth, sourceHeight].every(n => Number.isFinite(n) && n > 0)) return null;
   const scale = Math.min(containerWidth / sourceWidth, containerHeight / sourceHeight);
@@ -42,13 +82,27 @@ export function validBox(box) {
 /** Each output follows its own reported readiness; missing parts do not disable healthy ones. */
 export function controlAvailability(state, { online = false, owned = false, hidden = false } = {}) {
   const fresh = state.pi?.connected === true && Number(state.pi.age_ms ?? Infinity) < 1000;
-  const manual = online && owned && fresh && !state.stopped && state.mode === 'manual' && !hidden;
   const ready = state.readiness || {};
+  const anotherOwner = !!state.owner_session_id && !owned;
+  const connectionReason = !online ? 'Backend offline. Wait for it to reconnect.'
+    : !state.pi?.connected ? 'Pi offline. Start the Pi API and wait for it to connect.'
+    : !fresh ? 'Pi status is stale. Wait for fresh readings.'
+    : hidden ? 'Return to this tab to use the controls.'
+    : anotherOwner ? 'Another operator has control. They must disable their controls first.' : '';
+  const gateReason = connectionReason || (!owned || state.stopped !== false ? 'Click Enable controls first.'
+    : state.mode !== 'manual' ? 'Auto mode is selected. Select Manual, then Enable controls to use these buttons.' : '');
+  const manual = !gateReason;
+  const enableReason = connectionReason || (ready.resume?.available !== true ? ready.resume?.reason || 'Waiting for Pi readiness.'
+    : state.mode === 'auto' && ready.auto?.available !== true ? ready.auto?.reason || 'Auto is not ready.'
+    : owned && state.stopped === false ? 'Controls are already enabled.' : '');
+  const reasons = Object.fromEntries(['drive', 'servo', 'pump'].map(name => [name,
+    gateReason || (ready[name]?.available === true ? ready[name]?.reason || '' : ready[name]?.reason || 'Waiting for component readiness.')]));
   return {
-    fresh, manual,
+    fresh, manual, gateReason, enableReason, reasons,
+    manualMode: !connectionReason,
     drive: manual && ready.drive?.available === true,
     servo: manual && ready.servo?.available === true,
     pump: manual && ready.pump?.available === true,
-    resume: online && owned && fresh && state.stopped === true && ready.resume?.available === true && (state.mode !== 'auto' || ready.auto?.available === true),
+    enable: !enableReason,
   };
 }

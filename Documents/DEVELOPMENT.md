@@ -2,12 +2,23 @@
 
 [Documentation index](README.md) | Prerequisite: [Architecture](ARCHITECTURE.md) | [Tests](TESTING_AND_TROUBLESHOOTING.md)
 
+## Contents
+
+- [Choose the smallest owner of the change](#choose-the-smallest-owner-of-the-change)
+- [A repeatable change workflow](#a-repeatable-change-workflow)
+- [Change automatic logic](#change-automatic-logic)
+- [Replace a model without changing its consumers](#replace-a-model-without-changing-its-consumers)
+- [Replace a complete service](#replace-a-complete-service)
+- [Contract rules that are easy to miss](#contract-rules-that-are-easy-to-miss)
+- [Evolving an API](#evolving-an-api)
+- [Documentation and release discipline](#documentation-and-release-discipline)
+
 ## Choose the smallest owner of the change
 
 | You want to change... | Start here | Preserve/check |
 |---|---|---|
 | A screen, interaction or layout | `Frontend/public/index.html`, `style.css`, `app.js` | Accessible controls, authoritative state, local sign-in and disabled-state reasons. |
-| Keyboard/hold-to-drive behavior | Event bindings in `Frontend/public/app.js`, held-input state in `control.js` | Release/blur/cancel/hidden-tab stop behavior and finite drive lease. |
+| Keyboard/hold-to-drive behavior | Event bindings in `Frontend/public/app.js`, held-input state in `control.js` | WASD/arrow keys, typing exclusion, release/blur/cancel/hidden-tab stops and finite drive lease. Limited manual input must require a fresh press after expiry. |
 | Video reader or overlays | `Frontend/public/video.js`, overlay code in `app.js` | Direct video path, source aspect ratio, normalized coordinates, metadata expiry. |
 | Login, origins or browser transport | `Frontend/server.mjs` | Cookie scope, exact-origin checks, private server tokens and WS framing. |
 | Ownership, stop logic, command limits or action routing | `Backend/controller.py` | Single owner, replay/sequence protection, bounded actions, independent liveness gates. |
@@ -71,7 +82,7 @@ A replacement can use another language or framework. Matching route names is onl
 
 | Replace | Required public behavior | What to test |
 |---|---|---|
-| Frontend UI/server | Preserve Backend's HTTP/WS envelope, ownership/session/sequence rules and service token privacy. New UI may keep its own presentation. If replacing the Node server too, implement equivalent local/session/origin checks. | Claim/resume/release, held input expiry, Stop from viewer, no motion after reconnect, no cloud key exposed, direct camera/overlay behavior. |
+| Frontend UI/server | Preserve Backend's HTTP/WS envelope, ownership/session/sequence rules and service token privacy. New UI may keep its own presentation. If replacing the Node server too, implement equivalent local/session/origin checks. | Explicit enable, legacy claim/resume/release, held input expiry and release requirement, visible drive limits/pump cooldown, Stop from viewer, no motion after reconnect, no cloud key exposed, direct camera/overlay behavior. |
 | Backend | Serve [Frontend/Backend API](API_BACKEND_FRONTEND.md), consume [ML API](API_ML.md), write [Pi API](API_PI.md). Preserve single writer, timeouts, readiness, bounded gestures/auto/speech and telemetry semantics. | Existing frontend and real isolated Pi/ML fixtures, stale/malformed/replayed inputs, no automatic drive/pump/resume, documented startup/connection servo centering, partial hardware and owner/process loss. |
 | ML | Serve HTTP health/models/chat and `/v1/inference`; preserve bearer auth, session lifecycle, errors, version/identity/timing fields and normalized boxes. Decode the configured video directly. | Session ready only after valid inference, empty result vs failure, expiry, session replacement, chat fallback/proposal contracts, max sizes/rates and consumer limits. |
 | Pi hardware server | Preserve public identity/status, API 2.3 command/telemetry shapes, single controller, relative degrees, independent expiry/stop/shutdown/speech and partial-hardware nulls. Advertise compatible discovery and provide video endpoints or update their mapping deliberately. | Backend startup/reconnect, all command validation, silence timeout, drive/pump expiry, failing/absent modules, script shutdown and owned-process cleanup. |
@@ -90,7 +101,8 @@ For a remote replacement, use **standalone configuration**: normal `run_stack.py
 - Monotonic timestamps belong to their process/host. Use documented ages and clock-basis fields; do not compare unrelated clocks as wall time.
 - Backpressure must remain bounded. Keep recent observations rather than accumulating seconds of stale video or commands.
 - Generic heartbeats do not refresh a drive command. Auto remains supervised by the live owner.
-- A browser reconnect or Backend restart needs a new control claim and Resume. A Pi-only reconnect can retain the existing browser owner, but still stops actions and resets the relevant alignment check; it never resumes automatically.
+- A browser reconnect or Backend restart needs explicit Enable controls (or legacy claim then resume). A Pi-only reconnect can retain the existing browser owner, but still stops actions and resets the relevant alignment check; it never enables automatically.
+- Limited manual drive is separate from chat/auto: missing or unverified IR caps it at 20% and two seconds per press, with release required after either input or hold expiry. Repeated commands must never reset that fixed limit; verified known hazards still block/stop. Auto/chat movement retain strict four-IR readiness.
 - Preserve graceful cancellation and parent-owned process cleanup; never solve a stale-worker problem by silently running a second writer/reader.
 
 ## Evolving an API

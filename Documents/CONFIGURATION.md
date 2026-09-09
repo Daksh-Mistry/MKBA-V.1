@@ -2,6 +2,17 @@
 
 [Documentation index](README.md) | [Beginner setup](GETTING_STARTED.md) | [Development](DEVELOPMENT.md)
 
+## Contents
+
+- [Normal setup needs no configuration edits](#normal-setup-needs-no-configuration-edits)
+- [Where settings live](#where-settings-live)
+- [Automatic startup versus standalone startup](#automatic-startup-versus-standalone-startup)
+- [Environment precedence](#environment-precedence)
+- [Typical changes](#typical-changes)
+- [Credentials and network roles](#credentials-and-network-roles)
+- [Generated files and backups](#generated-files-and-backups)
+- [Updating a deployment](#updating-a-deployment)
+
 ## Normal setup needs no configuration edits
 
 Use `START_ROBO.cmd` on the computer and `bash start_robo.sh` for the Pi API. Start video separately with `bash start_camera.sh` in another Pi terminal. The computer creates consistent private service settings and discovers the Pi. The only optional normal-user entry is `CHAT_API_KEY` in the root `.env` for broader conversation. Leave it blank for local chat.

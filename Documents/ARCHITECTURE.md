@@ -2,6 +2,16 @@
 
 [Documentation index](README.md) | [API maps](#communication-boundaries) | [Change or replace a component](DEVELOPMENT.md)
 
+## Contents
+
+- [System responsibilities](#system-responsibilities)
+- [Communication boundaries](#communication-boundaries)
+- [Processes, tasks and threads](#processes-tasks-and-threads)
+- [Startup and reconnect](#startup-and-reconnect)
+- [Data and decision flow](#data-and-decision-flow)
+- [Source tree and module ownership](#source-tree-and-module-ownership)
+- [State and persistence](#state-and-persistence)
+
 ## System responsibilities
 
 Robo has three computer services and a Pi hardware service. **Backend is the single software authority for robot actions.** Frontend provides the user experience, ML supplies detections/conversation, and Pi performs validated hardware operations with its own timeouts. The current automatic policy is supervised stationary aiming/spraying; it is not autonomous navigation.
@@ -67,7 +77,7 @@ Windows server descendants are born inside the launcher's Job Object. The OS cle
 5. ML, Backend and Frontend start; the browser opens when the UI listener is ready. Robot actions begin stopped.
 6. Backend reconnects its Pi and ML clients independently. The supervisor retries discovery about every 15 seconds. A changed Pi address restarts Backend/ML with new control/video URLs while preserving the frontend process.
 
-Reconnection invalidates control assumptions. The browser operator must reclaim/resume when required; auto alignment confirmation resets after relevant loss. Neither a restarted server nor a recovered camera automatically authorizes motion.
+Reconnection invalidates control assumptions. The browser operator must explicitly Enable controls when required; this combines claiming ownership and resuming, while the separate legacy commands remain supported. Auto alignment confirmation resets after relevant loss. Neither a restarted server nor a recovered camera automatically authorizes motion.
 
 ## Data and decision flow
 
@@ -81,6 +91,8 @@ The backend result may mean **sent to Pi**, not physically executed. Pi has no g
 
 Pi samples raw IR/flame channels and reports diagnostics plus per-component availability. Backend preserves unknown values, observes IR transition evidence and applies conservative clear/blocked processing. The UI receives processed sensors. Chat receives a bounded summary of mode, ownership, Pi status, latest detection and speaker context, not the complete IR/flame arrays. Motion checks depend on relevant sensors and components, not a single global "hardware attached" flag.
 
+Normal manual held driving, automatic operation and chat movement require four usable clear IR inputs. Missing/unverified IR permits only a manual bench check capped at 20% and a fixed two seconds per press. Input/hold expiry requires release before another press; refresh messages cannot extend it. Verified known hazards still block/stop. Backend advertises these limits and pump cooldown through readiness so the UI can explain each control's current behavior.
+
 Missing servo/pump outputs can be `null`. Never coerce them to 90/off or use a default as evidence that a stop succeeded. GPIO/controller availability, actuator power and actual physical movement are different observations.
 
 ### Detection and auto
@@ -91,7 +103,7 @@ Auto still needs a live UI owner heartbeat. It scans, confirms, aligns, sprays b
 
 ### Chat and voice
 
-Backend supplies bounded processed robot/detection context to ML. Exact gesture parsing runs before conversational generation. Without a key, local code answers supported questions; a configured provider can supply broader text. Gesture proposals return to Backend for the same permission/readiness checks as UI commands. LLM prose never becomes executable robot commands.
+Backend supplies bounded processed robot/detection context to ML. Exact gesture parsing runs before conversational generation. Without a key, local code answers supported questions; a configured provider can supply broader text. Gesture proposals return to Backend for ownership, freshness and component checks; chat movement retains strict four-IR readiness and cannot use the limited manual allowance. LLM prose never becomes executable robot commands.
 
 Speech text goes Backend → Pi → local audio tools. It is not played by browser speech synthesis and does not need a cloud voice model. Acceptance, completion and audible playback are distinct.
 
@@ -135,7 +147,7 @@ Every active service module has a responsibility map in its own README:
 | `startup.py` | Normal-start repair of generated settings, loopback enforcement, free ports, identity-checked discovery and URL mapping. Its `prepare_settings` is deliberately more opinionated than standalone `configure`. |
 | `run_stack.py` | Merges/filters environments, creates children and logs, discovers/reconnects Pi, records stack URL, handles child failure and cleanup. Cloud credentials only enter ML's child environment. |
 | `windows_processes.py` | Creates a non-inherited kill-on-close Job handle and places the launcher in it before children exist; no manual early close of this handle. |
-| `scripts/package_pi.py` | Builds `dist/pi-ready.tar.gz` from allowed Pi source types, root README and canonical Documents; excludes settings, installed binaries/environments/caches and symlinks. |
+| `scripts/package_pi.py` | Builds `dist/pi-ready.tar.gz` from allowed Pi source types, root/component READMEs and canonical Documents; excludes settings, installed binaries/environments/caches and symlinks from discovered Pi/doc inputs. Computer-service source remains in the full checkout. |
 | `requirements.txt` | Aggregate computer dependency entry; component requirements remain owned by their services. |
 | `.gitattributes` | Keeps Pi `.sh` files with LF line endings after Windows checkout. |
 

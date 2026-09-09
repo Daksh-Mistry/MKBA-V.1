@@ -4,6 +4,17 @@
 
 The frontend consists of one Node.js server and a browser application. The server handles local access, protected LAN login, static assets and the authenticated backend proxy. The browser shows direct Pi video, robot state, independent hardware availability, controls, detection boxes and conversation. Every control/metadata request goes through the backend. LLM API keys never enter browser JavaScript.
 
+## Contents
+
+- [Startup and configuration](#startup-and-configuration)
+- [Active files and call flow](#active-files-and-call-flow)
+- [Login, ownership and reconnect](#login-ownership-and-reconnect)
+- [Controls and visible state](#controls-and-visible-state)
+- [Conversation](#conversation)
+- [Direct video and overlays](#direct-video-and-overlays)
+- [Server interface and replacement](#server-interface-and-replacement)
+- [Test and troubleshoot](#test-and-troubleshoot)
+
 ## Startup and configuration
 
 For normal use, start the repository launcher. It installs the runtime, creates matching credentials, starts Backend/ML/Frontend and opens the local console automatically. The printed/opened URL is authoritative: the launcher prefers the configured frontend port if available. A new configuration uses port 3000 from `.env.example`; the launcher's missing/invalid-setting fallback is 3001. No copied login token or LLM API key is required. See [Getting started](../Documents/GETTING_STARTED.md).
@@ -65,14 +76,14 @@ Every backend WebSocket connection receives its own session ID. Reconnect clears
 
 | UI action | Request and behavior |
 | --- | --- |
-| Take control / Release / Resume | Separate ownership/stop-latch operations. Resume requires Pi readiness and, in auto, all auto prerequisites. |
-| Drive arrows or W/A/S/D | Hold to refresh a semantic direction at 10 Hz. Default speed 20%; slider range 10–60%. Space/Enter can operate a focused drive button. |
-| Release/cancel/blur/hidden page | Stop local drive refresh and send drive stop. Ownership loss, mode change and connection loss also clear held controls. Letter shortcuts do not intercept text input. |
+| Enable controls / Disable controls | Enable sends `control:enable`, combining ownership and resuming after readiness checks. Disable sends `control:release`, stopping actions and releasing ownership. Legacy claim/resume requests remain supported by Backend. |
+| Drive buttons, W/A/S/D or arrow keys | Hold to refresh a semantic direction at 10 Hz. Default speed 20%; normal slider range 10–60%. Missing/unverified IR caps actual drive at 20% and two seconds per press. Release before another press; held repeats cannot extend the cap. Space/Enter can operate a focused drive button. |
+| Release/cancel/blur/hidden page | Stop local drive refresh and send drive stop. Ownership loss, mode change and connection loss also clear held controls. Letter and arrow shortcuts do not intercept text input. |
 | Face arrows | One relative 5° request per tap. Displayed angles have one decimal; API precision is retained. |
-| Pump burst | Request an 800 ms burst. Backend enforces cooldown and maximum duration. |
+| Pump burst | Request an 800 ms burst. The button shows the three-second cooldown and remains disabled during a burst/cooldown. Pi also enforces a one-second maximum. |
 | Turn pump off | Available to the owner with a fresh Pi and available pump. It does not by itself leave auto or latch global stop. |
 | Stop robot / Escape | Any connected viewer can request whole-robot stop. Pi stops motors/pump/speech and centers available servos. If the browser cannot deliver, independent backend/Pi deadlines still apply. |
-| Manual / Auto | Stops outputs, changes mode; Auto can start vision. Resume remains a separate action. |
+| Manual / Auto | Stops outputs, changes mode; Auto can start vision. Enable controls explicitly after the change; auto retains its full IR/vision/alignment requirements. |
 | Confirm camera / nozzle check | Owner-only while stopped with available servos/pump. Records the user's physical operating check; does not measure or automatically calibrate alignment. |
 | Start / Pause detection | Sends selected detector ID or stops vision. Selecting the dropdown alone does not load a model. |
 | Speak on Pi speaker | Opt-in per chat request. Uses the backend/Pi speaker path, not browser speech synthesis. |
@@ -80,6 +91,8 @@ Every backend WebSocket connection receives its own session ID. Reconnect clears
 | Shut down Pi script | Owner-only confirmation; exits the Pi script after stopping outputs, not the OS or a separately started camera streamer. |
 
 Motor, servo and pump controls follow separate backend readiness values. Missing motors/sensors do not disable a healthy face or pump. The UI shows per-component failure reasons and unknown values instead of substituting successful hardware states. IR inputs without observed signal changes show **Input unverified**; digital flame signals are not a claim that a flame sensor is physically attached. See [Hardware](../Documents/HARDWARE.md).
+
+Unknown IR permits only the limited manual motor check, not unrestricted held driving. A verified known obstacle blocks/stops manual movement. Auto and chat movement still require all four usable clear IR inputs. The frontend displays the backend's limits and release requirement; it does not invent sensor readiness.
 
 The connection badge considers Pi status fresh below 1.5 s, but actuator controls use the stricter 1 s limit and backend readiness. `stopped:false` means the backend is resumed, not that motors are moving. `sent_to_pi` is a send result, not measured motion. Simulation is explicitly labelled.
 
@@ -126,7 +139,7 @@ Tests use temporary loopback services and issue no physical robot commands. Full
 | Local login unavailable | Start through the normal launcher; check loopback bind and exact Origin/Host. |
 | Backend offline | Backend process, selected port and shared service token. |
 | Pi offline | Pi script/network/discovery. Pi 2.3 needs no control token. |
-| Resume/control disabled | Ownership, stop state and the specific readiness reason. A connection alone does not establish hardware readiness. |
+| Enable/control disabled | Another owner, stale/disconnected Pi or the specific readiness reason. A connection alone does not establish hardware readiness. Check the visible limited-drive/release or pump-cooldown state for individual buttons. |
 | Video offline but Pi connected | Camera/MediaMTX is separate; check direct WHEP and UDP reachability. |
 | Video works but boxes do not | Owner starts detection; check ML status, installed checkpoint and ML's direct RTSP path. |
 | Keyless chat unavailable | ML service connectivity/shared token. An API key is not needed for basic responses. |

@@ -194,12 +194,18 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.robot.on_pi(status())
         self.assertTrue(self.robot.stopped)
 
-    async def test_unknown_or_stale_sensors_block_drive(self):
+    async def test_unknown_sensor_limits_manual_drive_but_stale_pi_blocks(self):
         await self.ready()
         await self.robot.on_pi(status(ir=[1, 1, -1, 1]))
+        await self.send('drive', direction='forward', speed=0.6)
+        self.assertEqual(self.result()['status'], 'sent_to_pi')
+        self.assertEqual(self.pi.sent[-1]['speed'], 0.2)
+        self.assertTrue(self.robot.readiness()['drive']['limited'])
+        self.clock.advance(1.01)
+        await self.robot.tick()
+        self.assertTrue(self.robot.stopped)
         await self.send('drive', direction='forward')
         self.assertEqual(self.result()['status'], 'rejected')
-        self.assertFalse(any(d.get('left') == 1 for d in self.pi.sent))
 
     async def test_existing_wiring_profile_does_not_require_environment_gate(self):
         self.robot.settings = replace(self.settings, motion_calibrated=False)

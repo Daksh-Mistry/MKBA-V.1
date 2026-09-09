@@ -54,16 +54,19 @@
 
       <section class="controls-panel panel" aria-labelledby="controls-heading">
         <div class="panel-heading"><div><p class="eyebrow">MOVEMENT</p><h2 id="controls-heading">Take the wheel</h2></div><span id="ownership-label" class="tiny-tag">Viewing</span></div>
-        <div class="session-controls"><button id="claim" class="primary" disabled>Take control</button><button id="resume" class="secondary" disabled>Resume</button><button id="release" class="quiet" disabled>Release</button></div>
+        <div class="session-controls"><button id="enable" class="primary" disabled>Enable controls</button><button id="release" class="quiet" disabled>Disable controls</button></div>
+        <p class="panel-note">Enable controls once to use this browser. Disable controls stops the robot and lets another browser control it.</p>
         <div class="segmented" role="group" aria-label="Operating mode"><button id="manual-mode" aria-pressed="true" disabled>Manual</button><button id="auto-mode" aria-pressed="false" disabled>Auto</button></div>
         <div class="control-columns"><div><h3>Drive <span class="muted">hold to move</span></h3><div class="direction-pad drive-pad" role="group" aria-label="Hold to drive"><button data-drive="forward" class="north" aria-label="Drive forward" disabled>↑</button><button data-drive="left" class="west" aria-label="Turn left" disabled>←</button><span class="pad-center" aria-hidden="true">WASD</span><button data-drive="right" class="east" aria-label="Turn right" disabled>→</button><button data-drive="backward" class="south" aria-label="Drive backward" disabled>↓</button></div></div>
         <div><h3>Face <span class="muted">5° per tap</span></h3><div class="direction-pad face-pad" role="group" aria-label="Move robot face"><button data-servo="up" class="north" aria-label="Look up 5 degrees" disabled>↑</button><button data-servo="left" class="west" aria-label="Look left 5 degrees" disabled>←</button><span class="pad-center face-icon" aria-hidden="true">··</span><button data-servo="right" class="east" aria-label="Look right 5 degrees" disabled>→</button><button data-servo="down" class="south" aria-label="Look down 5 degrees" disabled>↓</button></div></div></div>
         <div class="speed-row"><label for="speed">Drive speed <output id="speed-value" for="speed">20%</output></label><input id="speed" type="range" min="0.1" max="0.6" step="0.05" value="0.2"></div>
+        <p id="drive-note" class="panel-note" role="status">Enable controls, then hold WASD, arrow keys or a direction button.</p>
         <div class="actuator-row"><span class="micro">FACE <strong id="servo-position">— / —</strong></span><span class="micro">PUMP <strong id="pump-state">Unknown</strong></span></div>
         <div class="pump-row"><button id="pump-on" class="secondary" disabled>Pump burst</button><button id="pump-off" class="quiet" disabled>Turn pump off</button></div>
+        <p id="pump-note" class="panel-note" role="status">Enable controls to use the pump.</p>
         <p id="hardware-issue" class="panel-note hardware-issue" role="status" hidden></p>
-        <details class="operating-check"><summary>Control availability &amp; auto operating check</summary><pre id="readiness-summary">Waiting for Pi status.</pre><button id="alignment-check" class="secondary small-button" disabled>Confirm camera / nozzle check</button><p class="micro">Services start without setup. For physical operation, trigger and release each IR sensor to verify its input. Confirm camera/nozzle alignment before automatic water spraying. Available face and pump controls work independently.</p></details>
-        <p class="panel-note">Release a direction to stop. Stop robot also turns the pump off and centers the face.</p>
+        <details class="operating-check"><summary>Control availability &amp; auto operating check</summary><pre id="readiness-summary">Waiting for Pi status.</pre><button id="alignment-check" class="secondary small-button" disabled>Confirm camera / nozzle check</button><p class="micro">Missing or unverified IR inputs limit manual driving to short, slow tests. Trigger and release each IR sensor to verify its input. Auto also requires the camera/nozzle operating check. Available face and pump controls work independently.</p></details>
+        <p class="panel-note">Release a direction to stop. Stop robot also turns the pump off and centers the face. Click Enable controls again after Stop.</p>
       </section>
 
       <section class="sensors-panel panel" aria-labelledby="sensors-heading">

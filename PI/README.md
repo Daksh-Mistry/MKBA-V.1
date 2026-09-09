@@ -4,6 +4,14 @@ This folder runs on the Raspberry Pi and controls the robot's hardware. The comp
 
 Use [Getting started](../Documents/GETTING_STARTED.md) for the whole project, [Pi API](../Documents/API_PI.md) for exact messages, and [Hardware](../Documents/HARDWARE.md) for wiring and physical checks. The current API version is **2.3**, with WebSocket protocol version **2**.
 
+## Contents
+
+- [Start on Raspberry Pi OS Bookworm](#start-on-raspberry-pi-os-bookworm)
+- [Check that it started](#check-that-it-started)
+- [Normal use and shutdown](#normal-use-and-shutdown)
+- [How the folder is organized](#how-the-folder-is-organized)
+- [Optional settings and diagnostics](#optional-settings-and-diagnostics)
+
 ## Start on Raspberry Pi OS Bookworm
 
 Use Raspberry Pi OS **64-bit / arm64** on the Pi, with a normal login account, a network connection and internet access for the first installation. No Pi token, required `.env` file, LLM key or sensor registration is needed.
@@ -68,11 +76,11 @@ WebRTC media also uses UDP **8189**. Video is separate from `/ws`: there is no M
 
 ## Normal use and shutdown
 
-Start the computer using its root launcher and use the UI described in [Operating guide](../Documents/OPERATING_GUIDE.md). It manages control ownership, explicit Resume, sensor checks and automatic-mode eligibility. The Pi permits only one control WebSocket, so close a direct diagnostic before starting backend control. HTTP `/status` remains available alongside the controller.
+Start the computer using its root launcher and use the UI described in [Operating guide](../Documents/OPERATING_GUIDE.md). **Enable controls** combines ownership and resuming; Backend applies sensor checks, bounded manual testing and automatic-mode eligibility. The Pi permits only one control WebSocket, so close a direct diagnostic before starting backend control. HTTP `/status` remains available alongside the controller.
 
 Pi `system.stop` stops available motors, pump and speech, and centers available servos. It keeps the API running. Pi `system.shutdown` performs stopping and exits the API; `start_robo.sh` then closes its discovery child. The independently started camera keeps running. Stop it with Ctrl+C in the `start_camera.sh` terminal. **Shutdown does not power off or reboot Raspberry Pi OS.** Restart the API with `bash start_robo.sh` and start the camera separately when needed.
 
-The Pi itself does not require a separate Resume message after Stop; the computer backend implements the stopped/Resume policy. Changing the Pi's `mode` to `auto` only stores a label. Autonomous decisions and ML inference run on the computer.
+The Pi itself does not require a separate Resume message after Stop; the computer backend implements explicit enabling and its legacy claim/resume policy. The UI's two-second, 20% manual test allowance for missing/unverified IR is enforced on the computer; Pi command shapes and independent deadlines are unchanged. Changing the Pi's `mode` to `auto` only stores a label. Autonomous decisions and ML inference run on the computer.
 
 ## How the folder is organized
 
@@ -95,7 +103,7 @@ The Pi itself does not require a separate Resume message after Stop; the compute
 | `test_websocket.py` | Optional connection/sensor diagnostic; sends heartbeats, not movement commands. Connection Stop/centering still applies. |
 | `tests/` | Non-actuating unit/protocol/setup/launcher checks using test doubles. |
 | `requirements-core.txt`, `requirements.txt` | API-only dependency subset and full Pi dependency list. Normal startup uses the full list. |
-| `robo.service` | Uninstalled, optional systemd template containing example user/paths. It is not part of the ready one-command path. |
+| `robo.service` | Uninstalled, optional systemd template containing example user/paths. It is not part of the normal API startup path. |
 
 Do not run hardware driver files directly as a normal startup method. Their `__main__` examples bypass the server's leases/deadlines and some move actuators through large ranges. The old `tests/test_all.py` sweep is retired. The API and controlled bench procedures are the supported paths.
 

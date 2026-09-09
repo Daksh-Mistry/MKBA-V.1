@@ -4,6 +4,17 @@
 
 The backend runs on the local computer. It owns control sessions, validates commands, processes Pi sensor readings, applies the stationary auto policy and sends all hardware commands to the Pi. It also sends conversation requests to ML and rechecks any proposed gesture. Video travels directly from the Pi to the browser and ML; the backend neither decodes nor proxies frames.
 
+## Contents
+
+- [Start and stop](#start-and-stop)
+- [Active modules and call flow](#active-modules-and-call-flow)
+- [Settings](#settings)
+- [Ownership, stop and independent hardware](#ownership-stop-and-independent-hardware)
+- [Auto state machine](#auto-state-machine)
+- [Conversation and vision integration](#conversation-and-vision-integration)
+- [Replacement and verification](#replacement-and-verification)
+- [Legacy files](#legacy-files)
+
 ## Start and stop
 
 Normal use starts this service through the repository launcher described in [Getting started](../Documents/GETTING_STARTED.md). The launcher installs dependencies, prepares service credentials, discovers the Pi and chooses available ports. No manual backend settings are needed. No LLM API key is required for local basic chat or supported gestures.
@@ -80,14 +91,14 @@ The following values are code defaults in `Settings`, **not environment variable
 
 ## Ownership, stop and independent hardware
 
-Each WebSocket gets a new backend session ID. Up to 32 viewer connections are supported, but exactly one may claim control. Claiming does not resume. Startup, reconnect, mode changes, operator loss, stale data and applicable faults leave control stopped. Resume is always explicit. Auto also requires the owner to keep sending heartbeat; closing the operator browser stops it.
+Each WebSocket gets a new backend session ID. Up to 32 viewer connections are supported, but exactly one may own control. The normal UI uses `control.command:enable` to combine taking ownership and resuming after readiness checks; Disable controls sends `release`. Legacy `claim`, `resume` and `release` remain supported, and `claim` alone still does not resume. Startup, reconnect, mode changes, operator loss, stale data and applicable faults leave control stopped. Enabling is explicit. Auto also requires the owner to keep sending heartbeat; closing the operator browser stops it.
 
 Hardware/prerequisite `readiness` is separate from permission to act. For example, `readiness.servo.available:true` does not grant a viewer ownership or override the stop latch.
 
 | Operation | Prerequisites beyond a valid request |
 | --- | --- |
 | Manual face | Owner, resumed manual mode, fresh/watchdog-capable Pi, available servos. |
-| Manual drive | Owner, resumed manual mode, fresh/watchdog-capable Pi, motors and all four fresh clear IR inputs with signal evidence on real Pi 2.3. Servos are not required. |
+| Manual drive | Owner, enabled manual mode, fresh/watchdog-capable Pi and available motors. All four verified fresh clear IR inputs permit normal held drive. Missing/unverified IR permits at most 20% speed and two seconds per press; release is required after expiry. A verified known obstacle blocks/stops movement. Servos are not required. |
 | Manual pump burst | Owner, resumed manual mode, fresh/watchdog-capable Pi, available pump, no current burst and elapsed cooldown. |
 | Pump off / drive stop | Owner and the relevant available component. They neutralize current outputs but do not latch whole-robot stop or exit auto. |
 | System stop | Any authenticated viewer; sets the backend stop latch even if the Pi cannot be reached. |
@@ -97,7 +108,9 @@ Hardware/prerequisite `readiness` is separate from permission to act. For exampl
 
 Pi 2.3 reports each component separately. Unavailable servo angles and pump state stay `null`; valid sensor data from other components remains usable. A newly lost actuator latches a stop and clears the runtime alignment confirmation. After an isolated component fault, healthy components can resume explicitly; unclassified/global faults remain blocking. A successful GPIO/controller setup is not proof of physical motor/pump attachment or actual servo position.
 
-IR hazards apply immediately. Clearing needs two clear samples. Real inputs also need a low/high change observed by this backend or the Pi's current-boot change counter; a steady pull-up alone is insufficient. This proves signal activity, not physical attachment or obstacle coverage. All four inputs gate every driving direction. Flame readings are displayed as digital signals; they do not directly activate the auto pump. Details are in [Hardware](../Documents/HARDWARE.md).
+Verified IR hazards block/stop manual driving immediately. Clearing needs two clear samples. Real inputs need a low/high change observed by this backend or the Pi's current-boot change counter; a steady pull-up alone is insufficient. This proves signal activity, not physical attachment or obstacle coverage. All four usable clear inputs are required for normal held driving, automatic operation and chat movement. Missing/unverified inputs permit only the bounded manual motor check; repeated drive updates cannot extend its fixed two-second deadline, and a release/stop must rearm another press. Flame readings are displayed as digital signals; they do not directly activate the auto pump. Details are in [Hardware](../Documents/HARDWARE.md).
+
+Pump readiness includes the active burst and three-second cooldown, so the UI can disable the burst button and show the wait. The normal UI requests 800 ms; Pi still enforces its separate one-second maximum. Enabling controls does not change pump or Pi watchdog limits.
 
 ## Auto state machine
 
@@ -121,7 +134,7 @@ Stale ML results, stale/unknown/hazardous IR data, connection loss, operator los
 
 Ordinary chat is asynchronous, so a slow API cannot hold the control lock or block stop/heartbeat. Only one non-stop chat request is pending per UI session and four globally. History is in-memory and limited to 12 messages per session. No-key local replies remain usable; provider failure does not make LLM output executable.
 
-Supported one-step gestures are rechecked against the original full user sentence, identity, age, ownership, manual mode, readiness and bounds. They are at most 5° for face movement or 300 ms at speed ≤0.2 for movement/turning. Negations, compound requests and arbitrary generated commands do not become actuator messages. Stop invalidates pending gestures; exact stop phrases bypass ML altogether. Speech acceptance is separate from movement and is not proof of audible playback.
+Supported one-step gestures are rechecked against the original full user sentence, identity, age, ownership, manual mode, readiness and bounds. They are at most 5° for face movement or 300 ms at speed ≤0.2 for movement/turning. Chat movement still requires all four usable clear IR inputs; it cannot use the limited manual motor allowance. Negations, compound requests and arbitrary generated commands do not become actuator messages. Stop invalidates pending gestures; exact stop phrases bypass ML altogether. Speech acceptance is separate from movement and is not proof of audible playback.
 
 Vision start/model changes stop active robot outputs. Swapping waits for the old session's stop acknowledgement and a health report that all old workers stopped. New session/capture identities reject delayed results. The current RGB detector does not consume sensor context, even though the backend processes sensors for control. See [ML API](../Documents/API_ML.md) and the [backend/frontend API](../Documents/API_BACKEND_FRONTEND.md).
 

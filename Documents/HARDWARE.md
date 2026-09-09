@@ -4,6 +4,18 @@ This guide records the software's wiring assumptions, controlled bench procedure
 
 The Pi can run with a bare board, a few components or a complete robot. GPIO initialization does not identify a physically attached sensor, motor or pump. A PCA9685 response does not measure a servo shaft. Software cannot attach wiring, measure an unknown supply rating, infer nozzle alignment or confirm water impact.
 
+## Contents
+
+- [What the current code expects](#what-the-current-code-expects)
+- [GPIO numbering and power](#gpio-numbering-and-power)
+- [Sensor pin map](#sensor-pin-map)
+- [PCA9685 and servo wiring](#pca9685-and-servo-wiring)
+- [Motor driver wiring and direction](#motor-driver-wiring-and-direction)
+- [Pump and relay wiring](#pump-and-relay-wiring)
+- [Manual bench procedure](#manual-bench-procedure)
+- [Assembled robot acceptance](#assembled-robot-acceptance)
+- [Recorded bench observations](#recorded-bench-observations)
+
 ## What the current code expects
 
 | Part | Software interface / convention | What remains a physical fact to check |
@@ -74,7 +86,7 @@ Begin with one IR module and a suitable test target, such as a card for a reflec
 
 With pull-ups and no external wiring, typical values are flame `[0,0,0,0]` and IR `[1,1,1,1]`. Those are empty-pin levels, not eight working sensors. Counters include both telemetry and HTTP `/status` reads, reset at restart, and are normally sampled around 5 Hz. Very brief pulses may be missed. Runtime read faults retry; initialization faults require repair and restart.
 
-For real hardware, Backend requires signal evidence on every IR channel before allowing drive. It can obtain that evidence from observed 0/1 changes or the Pi's retained `changes` counters. A hazard is applied immediately; clearing requires two clear samples. These rules reject steady unproven pull-ups, but do not prove physical attachment: noise can also produce transitions. The operator still needs to match repeated changes to the correct real sensor. Full policy is in [Operating guide](OPERATING_GUIDE.md).
+For real hardware, Backend requires signal evidence on every IR channel for normal held driving, automatic operation and chat movement. It can obtain that evidence from observed 0/1 changes or the Pi's retained `changes` counters. Missing/unverified IR permits a limited manual bench check at no more than 20% speed and two seconds per press; repeated held commands cannot extend it. Release is required after that limit or an input timeout. A verified known hazard blocks/stops manual movement; clearing requires two clear samples. These rules do not prove physical attachment: noise can also produce transitions. The operator still needs to match repeated changes to the correct real sensor. Full policy is in [Operating guide](OPERATING_GUIDE.md).
 
 ## PCA9685 and servo wiring
 
@@ -228,7 +240,7 @@ The following are operating checks, not required `.env` chores. The current app 
 
 1. Confirm the physical identity, position and supply of each connected component. For each IR sensor, repeatedly trigger/release it and record clear/blocked polarity and correct index. Flame readings must also match the intended source and position. Do not treat a sensor change alone as proof of reliability.
 2. With motor/pump power isolated, confirm small named face moves and nominal centering. Verify the entire permitted mechanical range before using larger motions.
-3. On a stable stand with wheels free, verify short manual directions, release stopping, UI Stop, browser-controller loss and backend loss. Check reconnection remains stopped until explicit Resume. Connect only the component power needed for the test.
+3. On a stable stand with wheels free, click Enable controls in Manual mode and verify short directions, release stopping, UI Stop, browser-controller loss and backend loss. If IR is missing/unverified, each press is limited to 20% speed and two seconds; release before another press. Check reconnection remains stopped until Enable controls. Connect only the component power needed for the test.
 4. Verify relay off, bounded pump operation and actual flow with the appropriate test water arrangement. Verify speech separately by listening to a requested reply and cancelling it. Software completion is not audibility or flow measurement.
 5. Verify actual camera frames in the direct viewer and UI. Start vision without enabling auto and review recorded/printed positive examples plus ordinary scenes for detection errors. Current overlays are approximate; the browser and ML decode separately.
 6. Verify camera direction, servo response, nozzle direction and a suitable fixed target arrangement before automatic spraying. The stopped control owner confirms this alignment check in the UI. Confirming a button is the operator's statement, not a measured calibration. Pi reconnection or relevant hardware loss can reset that operating confirmation.

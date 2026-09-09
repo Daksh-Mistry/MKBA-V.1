@@ -2,6 +2,16 @@
 
 [Documentation index](README.md) | Prerequisite: [Setup](GETTING_STARTED.md) and [Hardware checks](HARDWARE.md)
 
+## Contents
+
+- [Read the screen first](#read-the-screen-first)
+- [View versus control](#view-versus-control)
+- [Manual movement](#manual-movement)
+- [Camera and detections](#camera-and-detections)
+- [Automatic mode](#automatic-mode)
+- [Chat and speaker](#chat-and-speaker)
+- [When something goes wrong](#when-something-goes-wrong)
+
 ## Read the screen first
 
 **Connected**, **available**, **ready**, and **running** describe different things:
@@ -10,33 +20,37 @@
 |---|---|
 | Backend/Pi/ML connected | A service connection exists; it does not prove every component works. |
 | Hardware available | Its interface initialized/reports usable status; this is not physical motion or attachment feedback. |
-| Control availability | Hardware and data prerequisites for that action; ownership and explicit Resume still apply. |
+| Control availability | Hardware and data prerequisites for that action; explicit Enable controls and ownership still apply. |
 | Fresh sensor data | Recent input according to the backend's processing rules; unknown remains unknown. |
 | Video playing | This browser receives camera frames. ML has a separate decoder and separate readiness. |
 | Detection ready | ML has loaded its model and produced a valid prediction in the active session. |
 
-Open **Control availability & auto operating check** when a button is disabled. Its reason is more useful than repeatedly pressing Resume. Servo angles shown in the UI are reported output settings, not encoder measurements. Pump state is output state, not flow measurement.
+Open **Control availability & auto operating check** when a button is disabled. Read its reason before trying again. Servo angles shown in the UI are reported output settings, not encoder measurements. Pump state is output state, not flow measurement.
 
 ## View versus control
 
-Local sign-in is automatic through the frontend. Several browser sessions can view data/video, but one session owns control at a time. Click **Take control**, inspect the current state, then **Resume** when the required hardware checks pass.
+Local sign-in is automatic through the frontend. Several browser sessions can view data/video, but one session owns control at a time. Inspect the current state, then click **Enable controls**. This combines taking ownership and clearing the stopped state, with fresh Pi status and action prerequisites still checked. **Disable controls** stops actions and releases ownership.
 
-Reconnecting does not reclaim or resume control. Closing the owner page, losing its heartbeat or releasing ownership stops actions. Manual Resume can succeed with some components or IR evidence missing; those individual actions remain unavailable. Resume does not bypass action-specific checks. Auto has its own stricter prerequisites.
+Reconnecting does not enable control automatically. Closing the owner page, losing its heartbeat or disabling controls stops actions. Missing components only block actions that need them. Missing or unverified IR permits the limited manual motor check described below; automatic operation and chat movement still require all four usable clear IR inputs. Enable controls never overrides a known obstacle or an unavailable actuator.
+
+If Auto remains selected after its owner disconnects, select **Manual**, then **Enable controls**. Selecting Manual can take unowned control while keeping the robot stopped; it cannot take control away from another connected owner.
 
 Any signed-in viewer can request **Stop robot**. Ordinary motion and pump commands require ownership; even the separate **Turn pump off** command is owner-only. Viewers should use **Stop robot** when they need all actions stopped.
 
 ## Manual movement
 
-1. Take control, select Manual and resume.
-2. Hold a drive button or **W/A/S/D**. The UI refreshes the drive request while held.
+1. Enable controls in Manual mode. A mode change stops actions; enable again when ready.
+2. Hold a drive button, **W/A/S/D**, or an **arrow key**. The UI refreshes the drive request while held. Movement shortcuts are ignored while typing in a text field.
 3. Release the key/button to stop. Hiding the tab, losing focus, cancellation or disconnection also clears held movement.
 4. Use the speed slider to change requested speed. Backend limits still apply.
 
-Drive requests expire independently of generic connection heartbeats. A UI heartbeat cannot keep a stale motor command alive. Real IR inputs must have observed signal transitions and processed usable values; trigger/release each input during the controlled hardware check. Steady pull-up readings are not enough.
+Drive requests expire independently of generic connection heartbeats. A UI heartbeat cannot keep a stale motor command alive. With all four verified, fresh and clear IR inputs, holding a direction uses the normal drive limit. With IR missing or unverified, manual driving automatically becomes a bench check: **at most 20% speed and two seconds per press**. Repeated held updates cannot extend that two-second limit. Release the key/button, then press again for another check. A verified known obstacle still blocks or stops movement.
+
+Trigger/release each real IR input during the controlled hardware check. Steady pull-up readings are not verification. This short manual allowance does not enable automatic operation or chat movement with unknown IR inputs.
 
 Face arrows request a small **relative 5-degree step**, not an absolute final angle. A second accepted tap adds another step. The backend restricts per-request angles; the Pi hardware layer clips the final physical output range. Stop returns to nominal 90/90, with possible PWM readback quantization.
 
-**Pump burst** requests a short timed burst; the backend and Pi each enforce expiry. Check the physical pump setup first. Do not assume a relay-state change means water actually flowed.
+**Pump burst** requests **800 milliseconds**, with a **three-second cooldown** after it turns off. The button shows the cooldown and stays disabled until another burst is available. Pi independently limits pump-on to one second. **Turn pump off** stops an active burst early. Do not assume a relay-state change means water actually flowed.
 
 ## Camera and detections
 
@@ -54,7 +68,7 @@ The automatic controller is ordinary code in Backend. It uses pretrained fire de
 
 Before auto use, the stopped control owner must perform and confirm the camera/nozzle alignment check in the UI. This records an operator assertion, not machine-measured calibration. Relevant component loss or Pi reconnection invalidates it. Auto also needs servos, pump, usable IR inputs and fresh valid ML results. Motors are not needed for this stationary policy.
 
-Select Auto and explicitly Resume once ready. Keep the controlling browser open and connected: auto still requires its heartbeat. The current policy:
+Select Auto and explicitly enable controls once ready. Keep the controlling browser open and connected: auto still requires its heartbeat and all four usable clear IR inputs. The short manual motor allowance does not apply to auto. The current policy:
 
 1. Scans pan through a bounded region when it sees no fire.
 2. Requires repeated qualifying fire detections before selecting a target.
@@ -75,7 +89,7 @@ Exact gesture phrases such as `look right`, `move a little forward`, `turn left`
 
 ## When something goes wrong
 
-Press **Stop robot** when communication permits. The servers also enforce independent command and heartbeat timeouts. Read the connection cards, last error and control-availability reason. Restore the missing service/component, then reclaim and resume deliberately.
+Press **Stop robot** when communication permits. The servers also enforce independent command and heartbeat timeouts. Read the connection cards, last error and control-availability reason. Restore the missing service/component, then enable controls deliberately.
 
 Do not run a second raw Pi controller while the backend holds the Pi's single control connection. For development or bench testing, stop the normal computer controller first and use [API_PI](API_PI.md) and [Hardware](HARDWARE.md). A direct Pi client does not inherit Backend's ownership, noise processing or operating checks.
 

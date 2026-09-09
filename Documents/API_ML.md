@@ -4,6 +4,16 @@ This is the implemented interface between **Backend and ML**, not the browser's 
 
 For installation, module responsibilities, configuration and model replacement, read [ML README](../ML/README.md). Related contracts are [Backend/Frontend API](API_BACKEND_FRONTEND.md) and [Pi API](API_PI.md). See [Architecture](ARCHITECTURE.md) for routing and [Testing and troubleshooting](TESTING_AND_TROUBLESHOOTING.md) for verification procedures.
 
+## Contents
+
+- [Versions, transport and authentication](#versions-transport-and-authentication)
+- [Health and model registry](#health-and-model-registry)
+- [Inference WebSocket commands](#inference-websocket-commands)
+- [Detection results, units and consumer limits](#detection-results-units-and-consumer-limits)
+- [Chat request and response](#chat-request-and-response)
+- [Errors and close behavior](#errors-and-close-behavior)
+- [Optional provider wire contract](#optional-provider-wire-contract)
+
 ## Versions, transport and authentication
 
 The current ML service reports version **`0.1.0`**. Inference `hello` and `result` messages carry **`schema_version: 1`**. Other current messages do not carry a version field; do not invent a required version field in requests, because unknown input fields are rejected. The `/v1/` paths and service version are different concepts.
