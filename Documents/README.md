@@ -1,154 +1,59 @@
-# Robo 2.0 🤖
+# Robo documentation
 
-A robotics control system with Raspberry Pi hardware interface and web-based client for real-time robot control, sensor monitoring, and autonomous operation.
+[Project home](../README.md)
 
-## 📋 Project Overview
+This is the canonical documentation for the current source. It replaces the old plans, duplicate setup instructions and running chat notes. Setup, actual APIs and physical observations are kept distinct.
 
-**Robo 2.0** is a comprehensive robotics platform featuring:
-- **Raspberry Pi 4 (Server)**: Runs local server, broadcasts sensor data & video, receives commands
-- **Laptop/PC (Client)**: Connects to Pi, displays UI with manual controls, AI chat, video feed
+## New to the project
 
-## 🏗️ Project Structure
+Read these in order:
 
-```
-Robo 2.0/
-├── PI/                          # Raspberry Pi server code
-│   ├── server.py               # Main WebSocket server
-│   ├── config.py              # GPIO pins and configuration
-│   ├── hardware/              # Hardware interface modules
-│   │   ├── camera.py         # Video streaming
-│   │   ├── motors.py         # Motor control
-│   │   ├── servos.py         # Servo control (PCA9685)
-│   │   ├── sensors.py        # Sensor reading
-│   │   └── relay_led.py      # Relay and LED control
-│   └── requirements.txt      # Python dependencies
-│
-├── Laptop/PC/                  # Client-side code
-│   ├── auto_mode.py          # Autonomous mode logic
-│   ├── gemini_detector.py    # AI detection (Gemini)
-│   ├── Server/web/           # Web interface
-│   │   ├── index.html       # Main UI
-│   │   ├── app.js          # Client logic
-│   │   └── style.css       # Styling
-│   └── requirements.txt     # Python dependencies
-│
-├── STARTUP_INSTRUCTIONS.md     # Detailed setup guide
-└── ARCHITECTURE_CLARIFICATION.md  # Architecture documentation
-```
+1. [Getting started](GETTING_STARTED.md): each machine's role, fresh setup, file transfer, one-command startup and optional key.
+2. [Operating guide](OPERATING_GUIDE.md): ownership, Resume/Stop, controls, direct video, detection, supervised auto, chat and speaker.
+3. [Hardware](HARDWARE.md): pin maps, power/interface distinctions, staged physical checks and recorded bench evidence.
+4. [Testing and troubleshooting](TESTING_AND_TROUBLESHOOTING.md): symptoms, logs, diagnostics, test commands and what has actually been verified.
 
-## ✨ Features
+You do not need to edit service tokens or install a chat model to follow normal setup.
 
-- 🎮 **Real-time Control**: WebSocket-based bidirectional communication
-- 📹 **Video Streaming**: MJPEG video feed from Raspberry Pi camera
-- 🎯 **Motor & Servo Control**: Precise movement and camera pan/tilt
-- 🔥 **Sensor Integration**: Flame sensors, IR edge sensors, and status monitoring
-- 💧 **Pump Control**: Relay-controlled water pump activation
-- 🤖 **Manual & Auto Modes**: Switch between manual control and autonomous operation
-- 🌐 **Web Interface**: Modern, responsive web UI accessible from any device
+## Maintaining or extending the project
 
-## 🚀 Quick Start
+| Guide | Owns this information |
+|---|---|
+| [Architecture](ARCHITECTURE.md) | Component boundaries, process/task/thread layout, runtime flows, root modules, persistence and legacy code. |
+| [Configuration](CONFIGURATION.md) | Automatic versus standalone settings, precedence, credentials, deployment changes, generated files and updates. |
+| [Development](DEVELOPMENT.md) | Where to change logic, model/runtime/service replacement, compatibility requirements and change workflow. |
+| [Frontend/Backend API](API_BACKEND_FRONTEND.md) | Browser/private HTTP and WebSocket routes, authentication, requests, state, commands, errors and limits. |
+| [ML API](API_ML.md) | Health/models/chat HTTP, inference WebSocket lifecycle, results, context, timing and replacement contract. |
+| [Pi API](API_PI.md) | Identity/status/diagnostics HTTP, controller WebSocket, relative angles, telemetry, speech, leases and stop/shutdown. |
+| [Testing and troubleshooting](TESTING_AND_TROUBLESHOOTING.md) | Reproducible checks, test-module map, failure diagnosis and dated verification baseline. |
 
-### Prerequisites
+## Service internals and settings
 
-**On Raspberry Pi:**
-- Raspberry Pi OS Bookworm 64-bit
-- Camera module connected
-- All hardware wired per specifications
-- Python 3.11+ installed
+| Service guide | Covers |
+|---|---|
+| [Backend README](../Backend/README.md) | Control authority, sensor processing, policy phases, clients, configuration, limits and source-module map. |
+| [Frontend README](../Frontend/README.md) | Node server, browser modules, session/origin/proxy behavior, controls, video/overlays and settings. |
+| [ML README](../ML/README.md) | Registry/artifact/adapter/capture/engine, model replacement/training handoff, chat/provider/actions and settings. |
+| [Pi README](../PI/README.md) | Bookworm launcher/setup, component interfaces, hardware API, camera, speech, configuration and source-module map. |
 
-**On Laptop/PC:**
-- Modern web browser (Chrome/Edge/Firefox)
-- Python 3.9+ (for auto mode)
+## Find a change by its goal
 
-### Setup Instructions
+| Goal | Starting point |
+|---|---|
+| Change movement rules or sensor filtering | [Backend](../Backend/README.md), then [Development](DEVELOPMENT.md). |
+| Change scan/aim/spray logic | Backend `auto_policy.py` and `controller.py`, explained in [Backend](../Backend/README.md). |
+| Use another detector/model family or fine-tuned artifact | [ML replacement procedure](../ML/README.md), then [ML API](API_ML.md). |
+| Switch the conversational provider or run an offline LLM | [ML chat settings](../ML/README.md) and [Configuration](CONFIGURATION.md). |
+| Replace an entire service but keep its callers | [Development compatibility matrix](DEVELOPMENT.md), then that boundary's API guide. |
+| Add a UI or a new control client | [Frontend/Backend API](API_BACKEND_FRONTEND.md). |
+| Change drivers, pins or hardware | [Pi](../PI/README.md), [Hardware](HARDWARE.md), [Pi API](API_PI.md). |
+| Improve overlays or add new analysis metadata | [Architecture](ARCHITECTURE.md), [ML API](API_ML.md), [Frontend](../Frontend/README.md). |
 
-For detailed setup instructions, see [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTIONS.md)
+## Keep these documents useful
 
-**Quick Setup:**
+Update one canonical owner per fact: module internals in its service README, wire behavior in its API guide, user operations in the operating guide and deployment in setup/configuration. Link to it elsewhere rather than copying another full reference.
 
-1. **Pi Server Setup:**
-   ```bash
-   cd PI
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   python server.py
-   ```
+Examples describe the current implementation. Unsupported routes/messages are identified explicitly. Test fixtures use synthetic/simulated data; physical observations are dated and distinguish telemetry from what an operator actually measured.
 
-2. **Client Setup:**
-   - Open `Laptop/PC/Server/web/index.html` in your browser
-   - Enter Pi IP address and connect
-   - Start controlling your robot!
-
-## 🎮 Controls
-
-- `W/A/S/D` - Move robot (forward/left/backward/right)
-- `←/→` - Pan servo (left/right)
-- `↑/↓` - Tilt servo (up/down)
-- `Space` - Toggle pump ON/OFF
-- `Shift` - Speed boost (+30%)
-- `Ctrl` - Speed reduction (-30%)
-- `M` - Toggle Manual/Auto mode
-- `Esc` - Emergency stop
-
-## 🔧 Hardware
-
-- **Motors**: L298N driver with 4 DC motors
-- **Servos**: PCA9685 I2C servo controller (Pan & Tilt)
-- **Sensors**: 
-  - 5-in-1 flame sensor array
-  - 3 single flame sensors
-  - 4 IR edge sensors
-- **Actuators**: Relay-controlled water pump
-- **Camera**: Raspberry Pi Camera Module
-
-## 📡 Network
-
-- **WebSocket**: Port `8765` (control commands)
-- **Video Stream**: Port `8080` (MJPEG stream)
-- **Discovery**: mDNS name `robo.local` (fallback to IP)
-
-## 📚 Documentation
-
-- [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTIONS.md) - **Start Here!** Beginner-friendly setup guide.
-- [ARCHITECTURE_CLARIFICATION.md](ARCHITECTURE_CLARIFICATION.md) - System architecture and design decisions
-- [PI/README.md](PI/README.md) - Pi server documentation
-- [Laptop/PC/README.md](Laptop/PC/README.md) - Client documentation
-
-## 🛠️ Development
-
-### Requirements
-
-Install dependencies for both Pi and Laptop:
-
-```bash
-# Pi side
-cd PI
-pip install -r requirements.txt
-
-# Laptop side
-cd Laptop/PC
-pip install -r requirements.txt
-```
-
-### Configuration
-
-Edit `PI/config.py` to adjust:
-- GPIO pin mappings
-- Network settings
-- Motor speeds
-- Servo ranges
-- Sensor configurations
-
-## 📝 License
-
-This project is open source. Feel free to use and modify as needed.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
----
-
-**Ready to start? Follow the [STARTUP_INSTRUCTIONS.md](STARTUP_INSTRUCTIONS.md) guide!** 🚀
+When code changes, update affected examples, schema fields, defaults, limitations and tests in the same change. Use source and tests to settle disagreements; do not preserve contradictory historical instructions as another startup path.
 

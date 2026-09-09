@@ -93,7 +93,7 @@ One `on:true` starts a maximum nominal **1000 ms** burst. Repeated on messages d
 
 Stop cancels speech, clears drive/pump deadlines, stops available motors, turns off the available pump and centers available servos. Missing components are skipped. It is best effort: output failures are recorded and expire control; the server does not fabricate successful physical stopping. Stop is not latched at Pi level. Backend keeps its own stopped state until explicit operator Resume.
 
-Changing `command` to `shutdown` requests an orderly API exit. The normal launcher then terminates its owned camera/discovery/download children. Raspberry Pi OS stays running. The shutdown callback is installed by `python server.py`; an externally constructed Uvicorn app without this callback rejects shutdown with `Start with python server.py to enable script shutdown`.
+Changing `command` to `shutdown` requests an orderly API exit. `start_robo.sh` then terminates its owned discovery process. The independently launched camera and Raspberry Pi OS stay running. Stop camera streaming with Ctrl+C in the `start_camera.sh` terminal. The shutdown callback is installed by `python server.py`; an externally constructed Uvicorn app without this callback rejects shutdown with `Start with python server.py to enable script shutdown`.
 
 Removed messages have no aliases: `servo_delta`, `speed_scalar`, `emergency_stop` and system `reboot`. There is no sensor-enable command, LED command, camera command, arbitrary shell command, speech WebSocket command or Pi chat command.
 
@@ -125,7 +125,7 @@ Sent approximately **5 times per second** while connected and telemetry succeeds
 | `mode` | `manual` or `auto`; stored label. |
 | `speed` | Number 0–1; last successful drive speed, initially 0.5. |
 | `simulation` | Boolean; explicitly selected test doubles when true. |
-| `servos` | `{ "pan": number|null, "tilt": number|null }`; degrees 0–180 when available. |
+| `servos` | Object with `pan` and `tilt`, each a number or null; degrees 0–180 when available. |
 | `pump` | Boolean when the relay interface is available, otherwise `null`. |
 | `sensors` | `{ "flame_array": [int,int,int,int], "ir_array": [int,int,int,int] }`; values 0, 1 or −1. |
 | `hardware` | Component state and per-input diagnostics described below. |
@@ -211,6 +211,8 @@ A new accepted response has `state: "accepted"`, `request_id` and `simulation`. 
 The service retains up to **64** submitted request IDs in process memory. Reusing the same ID with identical text returns the recorded state plus `duplicate:true`, without replay. Reusing it with different text returns 409. Records are not persistent and older entries are evicted; do not rely on this for indefinite deduplication. A live lease is required even for duplicate POST requests. Cancellation kills/reaps owned speech subprocesses. Stop, disconnect, lease/fault trips and shutdown also cancel speech.
 
 ## Video is a separate interface
+
+Start video explicitly with `bash start_camera.sh` in a separate terminal in the Pi's `PI` folder. It verifies/downloads MediaMTX independently, uses its own camera lock and does not need the API or Python environment. It does not run OS package setup; normal API setup on a new OS supplies the camera/curl prerequisites first. Camera failures appear in that terminal and do not stop the hardware API. `PI_CAMERA_ENABLED` is still parsed as a legacy Python 0/1 setting, but it does not start or stop either launcher.
 
 MediaMTX owns RTSP TCP **8554**, HTTP/WebRTC **8889**, and WebRTC UDP **8189**. The path is `/cam`; the configuration allows unauthenticated reads from reachable clients and permits WebRTC origins `*`. No external publishing permission is granted by this configuration. Its source is `rpiCamera`, configured for 1280×720 at 30 FPS, automatic codec selection, baseline H.264 profile and IDR period 30. The actual source must be a supported, connected camera.
 

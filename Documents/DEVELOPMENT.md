@@ -7,7 +7,7 @@
 | You want to change... | Start here | Preserve/check |
 |---|---|---|
 | A screen, interaction or layout | `Frontend/public/index.html`, `style.css`, `app.js` | Accessible controls, authoritative state, local sign-in and disabled-state reasons. |
-| Keyboard/hold-to-drive behavior | `Frontend/public/control.js` | Release/blur/cancel/hidden-tab stop behavior and finite drive lease. |
+| Keyboard/hold-to-drive behavior | Event bindings in `Frontend/public/app.js`, held-input state in `control.js` | Release/blur/cancel/hidden-tab stop behavior and finite drive lease. |
 | Video reader or overlays | `Frontend/public/video.js`, overlay code in `app.js` | Direct video path, source aspect ratio, normalized coordinates, metadata expiry. |
 | Login, origins or browser transport | `Frontend/server.mjs` | Cookie scope, exact-origin checks, private server tokens and WS framing. |
 | Ownership, stop logic, command limits or action routing | `Backend/controller.py` | Single owner, replay/sequence protection, bounded actions, independent liveness gates. |
@@ -56,7 +56,7 @@ The detailed, copyable registry and adapter procedure is in the [ML README](../M
 
 | Change | Work needed |
 |---|---|
-| Compatible fire/smoke weights using the existing runtime | Store local weights under the allowed model root; create a distinct registry ID/revision/path/hash/label mapping; validate, load and infer; select while stopped. |
+| Compatible fire/smoke weights using the existing runtime | Store local weights in the project model directory by convention; create a distinct registry ID/revision/path/hash/label mapping; validate, load and infer; select while stopped. The registry resolves local paths relative to itself; it does not enforce a model-directory sandbox. |
 | Model with another output shape or runtime | Add an adapter and registry support, implement load/warm/predict/close, normalize output and add lifecycle/error tests. A newer YOLO name does not guarantee binary/runtime compatibility. |
 | Fine-tune a model | Train outside the live robot service, retain dataset/training/evaluation provenance, export a supported artifact and register it as a new revision. No training pipeline currently runs inside Robo. |
 | Add new output semantics/classes | Change producer and consumer schemas intentionally. Current consumers expect fire/smoke detections; new labels or depth/impact fields are not automatically useful. |
@@ -72,7 +72,7 @@ A replacement can use another language or framework. Matching route names is onl
 | Replace | Required public behavior | What to test |
 |---|---|---|
 | Frontend UI/server | Preserve Backend's HTTP/WS envelope, ownership/session/sequence rules and service token privacy. New UI may keep its own presentation. If replacing the Node server too, implement equivalent local/session/origin checks. | Claim/resume/release, held input expiry, Stop from viewer, no motion after reconnect, no cloud key exposed, direct camera/overlay behavior. |
-| Backend | Serve [Frontend/Backend API](API_BACKEND_FRONTEND.md), consume [ML API](API_ML.md), write [Pi API](API_PI.md). Preserve single writer, timeouts, readiness, bounded gestures/auto/speech and telemetry semantics. | Existing frontend and real isolated Pi/ML fixtures, stale/malformed/replayed inputs, no startup motion, partial hardware, owner/process loss. |
+| Backend | Serve [Frontend/Backend API](API_BACKEND_FRONTEND.md), consume [ML API](API_ML.md), write [Pi API](API_PI.md). Preserve single writer, timeouts, readiness, bounded gestures/auto/speech and telemetry semantics. | Existing frontend and real isolated Pi/ML fixtures, stale/malformed/replayed inputs, no automatic drive/pump/resume, documented startup/connection servo centering, partial hardware and owner/process loss. |
 | ML | Serve HTTP health/models/chat and `/v1/inference`; preserve bearer auth, session lifecycle, errors, version/identity/timing fields and normalized boxes. Decode the configured video directly. | Session ready only after valid inference, empty result vs failure, expiry, session replacement, chat fallback/proposal contracts, max sizes/rates and consumer limits. |
 | Pi hardware server | Preserve public identity/status, API 2.3 command/telemetry shapes, single controller, relative degrees, independent expiry/stop/shutdown/speech and partial-hardware nulls. Advertise compatible discovery and provide video endpoints or update their mapping deliberately. | Backend startup/reconnect, all command validation, silence timeout, drive/pump expiry, failing/absent modules, script shutdown and owned-process cleanup. |
 | Video service | Preserve browser WHEP/SDP/ICE/CORS behavior, direct RTSP decode, configured path and source geometry; or publish a compatible source descriptor and update clients together. | Real decode in browser and ML, camera loss/reconnect, independent metadata/video failure, correct overlay aspect ratio/expiry. |
@@ -90,7 +90,7 @@ For a remote replacement, use **standalone configuration**: normal `run_stack.py
 - Monotonic timestamps belong to their process/host. Use documented ages and clock-basis fields; do not compare unrelated clocks as wall time.
 - Backpressure must remain bounded. Keep recent observations rather than accumulating seconds of stale video or commands.
 - Generic heartbeats do not refresh a drive command. Auto remains supervised by the live owner.
-- Connection recovery does not restore old ownership or resume actions.
+- A browser reconnect or Backend restart needs a new control claim and Resume. A Pi-only reconnect can retain the existing browser owner, but still stops actions and resets the relevant alignment check; it never resumes automatically.
 - Preserve graceful cancellation and parent-owned process cleanup; never solve a stale-worker problem by silently running a second writer/reader.
 
 ## Evolving an API

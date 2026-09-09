@@ -29,7 +29,7 @@ Ports below are defaults, not service discovery. Computer ports can change when 
 |---|---|---|---|
 | Browser → Frontend | HTTP and WS `/api/v1/ws`, loopback UI port | Same-origin local session cookie by default; optional standalone token login | [Frontend/Backend API](API_BACKEND_FRONTEND.md) |
 | Frontend → Backend | HTTP/WS, normally `127.0.0.1:8100` | `ROBO_SERVICE_TOKEN`, kept server-side | [Frontend/Backend API](API_BACKEND_FRONTEND.md) |
-| Backend → Pi | WS `PI_HOST:8000/ws`; HTTP identity/status | No Pi token in API 2.3; one active controller socket | [Pi API](API_PI.md) |
+| Backend → Pi | WS `PI_HOST:8000/ws` for control/status; HTTP `/speech` for voice | No Pi token in API 2.3; one active controller socket | [Pi API](API_PI.md) |
 | Backend → ML | HTTP `127.0.0.1:8200`, WS `/v1/inference` | `ML_SERVICE_TOKEN` | [ML API](API_ML.md) |
 | Browser → MediaMTX | HTTP WHEP `PI_HOST:8889/cam/whep`, WebRTC media | Current Pi video configuration permits direct viewers | [Frontend](../Frontend/README.md), [Pi](../PI/README.md) |
 | ML → MediaMTX | RTSP `PI_HOST:8554/cam`, TCP decode by default | Configured source | [ML](../ML/README.md) |
@@ -48,14 +48,15 @@ The normal UI is local to the computer. Opening the UI from another device requi
 | Backend | One Python/Uvicorn process. Async Pi connection, ML metadata connection, 50 ms control timer, per-client WebSocket send/receive tasks and bounded request work. No separate auto process. |
 | ML | One Python/Uvicorn process. An active vision session adds two explicitly managed Python threads: capture and inference. Capture replaces a latest-frame slot; inference replaces a latest-result slot. Native libraries can use additional internal threads. |
 | Pi API | One Python/Uvicorn process. Async telemetry and 25 ms watchdog tasks; a speech task starts owned `espeak-ng`/`aplay` subprocesses when requested. |
-| Pi launcher | Bash supervises the API, MediaMTX and discovery advertisement. MediaMTX manages the configured camera capture/encoding resources; actual OS process count can vary with the camera implementation. |
+| Pi API launcher | `start_robo.sh` supervises the API and discovery advertisement; it does not start or stop the independent camera. |
+| Pi camera launcher | `start_camera.sh` supervises MediaMTX independently of Python/API state. MediaMTX manages camera capture/encoding resources; actual OS process count can vary with the camera implementation. |
 | Discovery | The computer uses temporary mDNS activity and a bounded pool of HTTP probes; it is not another persistent robot-control service. |
 | Simulation | An explicit extra fake-Pi Python process on the computer. Synthetic video is a separate optional publisher. |
 | Optional local LLM | An external process you install separately. None is needed for keyless basic chat. |
 
 Python worker threads are not force-killed on model replacement. ML cancellation/generation checks prevent stale results entering a new session; failure to retire a worker is a visible failure, not permission to start competing readers. See [ML internals](../ML/README.md).
 
-Windows server descendants are born inside the launcher's Job Object. The OS cleans them up on launcher termination, including crashes. Normal shutdown also explicitly stops children. Pi supervision separately owns and cleans its processes. Do not replace these launchers with untracked background processes and assume the same cleanup behavior.
+Windows server descendants are born inside the launcher's Job Object. The OS cleans them up on launcher termination, including crashes. Normal shutdown also explicitly stops children. On the Pi, the API and camera use separate Bash supervisors and locks: API shutdown/Ctrl+C stops only the API and discovery, while Ctrl+C in the camera terminal stops its streamer/download children. The camera launcher needs no Python environment. Do not replace these launchers with untracked background processes and assume the same cleanup behavior.
 
 ## Startup and reconnect
 
@@ -72,13 +73,13 @@ Reconnection invalidates control assumptions. The browser operator must reclaim/
 
 ### A manual command
 
-The browser sends a request ID, session identity and sequence with the requested action. Frontend validates the browser boundary and forwards it privately. Backend validates ownership, replay ordering, mode, limits and readiness, then maps the action into the smaller Pi command format. Pi validates the command and drives its module.
+The browser sends a request ID and sequence with the requested action. Backend derives session identity from the socket; clients must not add a `session_id` field to this command envelope. Frontend validates the browser boundary and forwards it privately. Backend validates ownership, replay ordering, mode, limits and readiness, then maps the action into the smaller Pi command format. Pi validates the command and drives its module. The root supervisor/discovery separately reads Pi HTTP identity; it does not obtain that identity through the command client.
 
 The backend result may mean **sent to Pi**, not physically executed. Pi has no generic actuator acknowledgement and no request deduplication. Pi telemetry provides subsequent reported output state. Retrying a relative servo command directly at Pi can move it twice; a replacement must retain the backend's duplicate-request protections.
 
 ### Sensors and readiness
 
-Pi samples raw IR/flame channels and reports diagnostics plus per-component availability. Backend preserves unknown values, observes IR transition evidence and applies conservative clear/blocked processing. UI and chat receive processed state. Motion checks depend on relevant sensors and components, not a single global "hardware attached" flag.
+Pi samples raw IR/flame channels and reports diagnostics plus per-component availability. Backend preserves unknown values, observes IR transition evidence and applies conservative clear/blocked processing. The UI receives processed sensors. Chat receives a bounded summary of mode, ownership, Pi status, latest detection and speaker context, not the complete IR/flame arrays. Motion checks depend on relevant sensors and components, not a single global "hardware attached" flag.
 
 Missing servo/pump outputs can be `null`. Never coerce them to 90/off or use a default as evidence that a stop succeeded. GPIO/controller availability, actuator power and actual physical movement are different observations.
 

@@ -1,7 +1,9 @@
 """Single-controller JSON commands and telemetry (video is separate)."""
 import asyncio
 import json
+import logging
 import math
+from time import monotonic
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import config
@@ -12,11 +14,28 @@ active_websockets = set()
 _robot_ref = None
 _owner = None
 _send_locks = {}
+_drive_logs = {}
+logger = logging.getLogger("pi")
 
 
 def set_robot_reference(robot):
     global _robot_ref
     _robot_ref = robot
+    _drive_logs.clear()
+
+
+def log_command(websocket, command):
+    """Keep drive refreshes readable while showing every changed command."""
+    if command["type"] == "drive":
+        key = id(websocket)
+        now = monotonic()
+        previous, logged_at = _drive_logs.get(key, (None, 0))
+        if previous == command and now - logged_at < 1.0:
+            return
+        _drive_logs[key] = (command, now)
+    elif command["type"] == "system":
+        _drive_logs.pop(id(websocket), None)
+    logger.info("Command received: %s", json.dumps(command, allow_nan=False))
 
 
 async def send_json(websocket, data):
@@ -39,6 +58,7 @@ async def dispatch_ws_message(websocket, message):
     if _robot_ref is None:
         return
     request_id = None
+    kind = None
     try:
         if len(message) > 4096:
             raise ValueError("message is too large")
@@ -62,6 +82,7 @@ async def dispatch_ws_message(websocket, message):
             try:
                 _robot_ref.require_control_lease()
             except ValueError as exc:
+                logger.warning("Command rejected: %s", exc)
                 await send_json(websocket, {"type": "error", "code": "control_lease_expired", "message": str(exc),
                                            **({"request_id": request_id} if request_id else {})})
                 await websocket.close(code=1008, reason="control lease expired; reconnect required")
@@ -71,6 +92,7 @@ async def dispatch_ws_message(websocket, message):
             left = direction(data.get("left", 0), "left")
             right = direction(data.get("right", 0), "right")
             speed = number(data.get("speed", config.DEFAULT_SPEED), "speed", 0, 1)
+            log_command(websocket, {"type": "drive", "left": left, "right": right, "speed": speed})
             _robot_ref.drive(left, right, speed)
         elif kind == "servo":
             pan, tilt = data.get("pan"), data.get("tilt")
@@ -80,22 +102,27 @@ async def dispatch_ws_message(websocket, message):
                 pan = number(pan, "pan", -180, 180)
             if tilt is not None:
                 tilt = number(tilt, "tilt", -180, 180)
+            log_command(websocket, {"type": "servo", "pan": pan, "tilt": tilt})
             _robot_ref.move_servos(pan, tilt)
         elif kind == "pump":
             on = data.get("on")
             if not isinstance(on, bool):
                 raise ValueError("on must be a JSON boolean")
+            log_command(websocket, {"type": "pump", "on": on})
             _robot_ref.pump(on)
         elif kind == "mode":
             value = data.get("value")
             if value not in ("manual", "auto"):
                 raise ValueError("mode value must be manual or auto")
+            log_command(websocket, {"type": "mode", "value": value})
             _robot_ref.mode = value
         elif kind == "system":
             command = data.get("command")
             if command == "stop":
+                log_command(websocket, {"type": "system", "command": command})
                 _robot_ref.safe_mode()
             elif command == "shutdown":
+                log_command(websocket, {"type": "system", "command": command})
                 _robot_ref.request_shutdown()
             else:
                 raise ValueError("system command must be stop or shutdown")
@@ -108,6 +135,7 @@ async def dispatch_ws_message(websocket, message):
         if kind == "heartbeat":
             await send_json(websocket, {"type": "heartbeat_ack", **({"request_id": request_id} if request_id else {})})
     except Exception as exc:
+        logger.warning("Command failed (type=%r, request_id=%r): %s", kind, request_id, exc)
         await send_json(websocket, {"type": "error", "message": str(exc),
                                    **({"code": exc.code, "component": exc.component} if isinstance(exc, HardwareUnavailable) else {}),
                                    **({"request_id": request_id} if request_id else {})})
@@ -132,16 +160,22 @@ def number(value, name, minimum, maximum):
 @websocket_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global _owner
+    client = websocket.client
+    peer = f"{client.host}:{client.port}" if client else "unknown"
     # Reserve ownership before the first await; a rejected second client cannot stop the owner.
     if _owner is not None or _robot_ref is None:
+        logger.warning("Controller %s rejected: another controller is connected or the server is unavailable", peer)
         await websocket.close(code=1008, reason="backend already connected or server unavailable")
         return
     _owner = websocket
+    accepted = False
     try:
         await websocket.accept()
+        accepted = True
         active_websockets.add(websocket)
         _send_locks[id(websocket)] = asyncio.Lock()
         _robot_ref.control_connected()
+        logger.info("Controller connected: %s", peer)
         await send_json(websocket, {
             "type": "hello", "mode": _robot_ref.mode, "protocol_version": 2,
             "server_version": "2.3", "hardware": _robot_ref.hardware.status(),
@@ -156,6 +190,9 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         active_websockets.discard(websocket)
         _send_locks.pop(id(websocket), None)
+        _drive_logs.pop(id(websocket), None)
+        if accepted:
+            logger.info("Controller disconnected: %s", peer)
         if _owner is websocket:
             _owner = None
             if _robot_ref is not None:
@@ -180,6 +217,7 @@ async def broadcast_telemetry_once():
         # below is a normal disconnection and must not overwrite a watchdog trip.
         json.dumps(payload, allow_nan=False)
     except Exception as exc:
+        logger.error("Robot telemetry failed: %s", exc)
         robot.safe_mode("telemetry_error")
         robot.faults = (robot.faults + [f"telemetry: {exc}"])[-8:]
         return

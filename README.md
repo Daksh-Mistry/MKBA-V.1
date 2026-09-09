@@ -1,76 +1,60 @@
-# Robo — start here
+# Robo
 
-The computer runs **Frontend, Backend and ML**. The Pi runs hardware control, speech and camera streaming. **No LLM API key is needed to start or use basic local chat.** The launchers install dependencies and create matching settings automatically.
+Robo is a Raspberry Pi robot controlled from a computer. The computer runs a **Frontend**, **Backend** and **ML service**; the Pi runs hardware control, camera streaming and local speech.
 
-## Start the computer
+**Start here: [Setup and first run](Documents/GETTING_STARTED.md).** No LLM API key is required. Automatic startup installs computer dependencies and the pretrained fire model, creates service settings and signs the local browser in.
 
-Double-click [START_ROBO.cmd](START_ROBO.cmd).
+## Quick start
 
-The first run downloads verified runtime tools when needed, creates the private Python environment, installs the dependencies and pretrained fire detector, checks the installation, and opens the UI. Later starts reuse the installation. You do not need to install Python or Node, copy tokens, or edit settings first.
+1. Put the full project on a **Windows x64 computer**.
+2. Copy the current Pi source/bundle to a Pi running **Raspberry Pi OS Bookworm 64-bit**. From its `PI` folder, run `bash start_robo.sh` for hardware control. For video, open a separate Pi terminal in that folder and run `bash start_camera.sh`.
+3. On the computer, double-click [START_ROBO.cmd](START_ROBO.cmd). Use the browser address printed by the launcher.
 
-The launcher prints the browser address; this computer currently uses **http://localhost:3001**. It chooses available ports without closing other applications. Local browser sign-in is automatic. Keep the launcher window open; **Ctrl+C** stops its servers. Starting it again opens the existing console.
+First installation needs internet access. OS setup, file transfer, networking and physical prerequisites are explained in the [beginner guide](Documents/GETTING_STARTED.md). Missing hardware does not prevent the Pi API from starting.
 
-The automatic computer installer supports **Windows x64** with built-in PowerShell. First installation needs internet access. Tools and environments stay inside this project; system Python and the permanent PATH are unchanged.
+The Pi API and camera have separate terminals and lifetimes. Ctrl+C stops the service in that terminal; API shutdown leaves the camera running. Pi setup details are saved in `PI/bin/setup.log`.
 
-## Start the Raspberry Pi
+Leave the optional root `CHAT_API_KEY` blank for now. Basic local chat answers supported status/help questions and recognizes bounded gestures. An optional compatible LLM supplies broader conversation; it does not control auto mode.
 
-Copy the current `PI/` folder, or extract the [Pi deployment bundle](dist/pi-ready.tar.gz), onto the Pi. From its `PI` directory run:
+## What the system does
 
-```bash
-bash start_robo.sh
-```
+- Manual drive, relative face movement, timed pump bursts and Stop.
+- Direct Pi video to browsers and ML, plus approximate detection overlays.
+- Pretrained fire/smoke detection and **supervised stationary** scan/aim/spray/reassess auto mode.
+- Basic keyless chat, optional LLM conversation, bounded chat gestures and Pi speech.
+- Partial-hardware status, ownership, data freshness checks and independent timeouts.
 
-On **Raspberry Pi OS Bookworm 64-bit**, the launcher automatically prepares Python, GPIO/I2C access, camera streaming, audio tools and discovery. It repairs the conflicting GPIO package combination and downloads the verified MediaMTX streamer when needed. The Pi needs no token, required `.env`, separate install command or copied Windows environment. First setup may request the Pi account's normal sudo password. It reports an OS reboot requirement if one remains; it does not reboot automatically.
+Auto does not navigate toward fire or measure distance. Software-reported output is not physical feedback. Follow the [operating guide](Documents/OPERATING_GUIDE.md) and [hardware checks](Documents/HARDWARE.md) before actuating the robot.
 
-The computer discovers a reachable Robo Pi and reconnects when its address changes. Both devices must be on a reachable network. Missing hardware is reported per component, so the API can run on a bare or partially assembled Pi.
+## Documentation
 
-Updating files on the computer does not update a running Pi. The bundle contains current source, without private settings or installed environments. See [Pi setup and troubleshooting](PI/README.md).
+[**Complete documentation index**](Documents/README.md)
 
-## Chat works now, without a key
+| I want to... | Read |
+|---|---|
+| Install and start from scratch | [Getting started](Documents/GETTING_STARTED.md) |
+| Use controls, video, auto and chat | [Operating guide](Documents/OPERATING_GUIDE.md) |
+| Understand processes, data flow and module ownership | [Architecture](Documents/ARCHITECTURE.md) |
+| Change settings or deployment topology | [Configuration](Documents/CONFIGURATION.md) |
+| Change logic, switch models or replace a whole component | [Development](Documents/DEVELOPMENT.md) |
+| Implement a compatible client/service | [Frontend/Backend API](Documents/API_BACKEND_FRONTEND.md), [ML API](Documents/API_ML.md), [Pi API](Documents/API_PI.md) |
+| Check wiring and actual hardware | [Hardware](Documents/HARDWARE.md) |
+| Run tests or diagnose a fault | [Testing and troubleshooting](Documents/TESTING_AND_TROUBLESHOOTING.md) |
 
-Basic local chat answers greetings, status, help and detection questions. It also recognizes exact small gestures such as `look right` and `move a little forward`, subject to the same ownership and hardware checks as the controls. This fallback is ordinary code, not an offline language model, so open-ended conversation is limited.
+Service internals: [Backend](Backend/README.md), [Frontend](Frontend/README.md), [ML](ML/README.md), [Pi](PI/README.md).
 
-For broader conversation later, enter the key in the automatically created **root `.env`** and restart:
+## Source and deployment
 
-```dotenv
-CHAT_API_KEY=your_key_here
-```
+`Backend/` owns actions and automatic policy. `Frontend/` owns the current web console. `ML/` owns inference and conversation. `PI/` owns hardware/video/audio. `scripts/` contains installation/packaging helpers; `tests/` contains cross-component checks.
 
-The default is the OpenAI-compatible OpenAI endpoint with `gpt-4.1-mini`. Leave the key blank for now. Other compatible providers/models can be selected later in advanced ML settings. The key stays on the computer; it is not sent to the browser or Pi. If the provider fails, basic local replies remain available.
+The old `Backend/web/` and combined Gemini controller files are legacy and are not started by the current launcher. Generated environments, runtime tools, model weights, private settings, logs and bundles are excluded from Git.
 
-## Use the robot
-
-1. Check the connection and component status. **Take control**, then **Resume**. Starting or reconnecting leaves actions stopped.
-2. Hold a movement button or WASD to drive. Releasing, losing focus or disconnecting stops the request. Face arrows move a small relative angle; pump requests are bounded bursts.
-3. Each control shows why it is unavailable. The built-in wiring profile supplies motor conventions; real IR inputs must show signal changes before driving is accepted. A steady GPIO reading alone cannot establish that a sensor is connected.
-4. Open the direct camera and start detection when the camera is publishing. The pretrained fire/smoke model is installed automatically. Detection boxes are approximate overlays because the UI and ML receive video independently.
-5. Auto mode scans, confirms fire, aims, sprays briefly and reassesses **while stationary**. The stopped operator confirms camera/nozzle alignment in the UI before auto use. This is a physical operating check, not a settings-file edit. This version does not navigate toward a fire.
-6. “Speak reply” requests speech from the Pi speaker. It is off until selected. Speech acceptance does not prove that the speaker produced sound.
-7. **Stop** or Escape stops motors, turns the pump off, centers the face at 90/90 and cancels speech. **Shutdown** exits the Pi script and camera launcher; it leaves the Pi OS running.
-
-Actual wiring, power, camera connection and alignment still determine what the robot can do. Software reports missing capabilities instead of pretending they are available.
-
-## Optional checks and simulation
-
-From PowerShell in the project folder:
+Build the Pi deployment bundle after computer setup:
 
 ```powershell
-.\START_ROBO.cmd -Check
-.\START_ROBO.cmd -Simulate
+.venv\Scripts\python.exe scripts\package_pi.py
 ```
 
-`-Check` prepares and verifies the installation without starting the servers. `-Simulate` starts an explicitly labelled fake Pi instead of using physical hardware. Stop an existing stack before switching modes. Simulation video requires a separate test publisher; the normal launcher's simulation mode does not manufacture a camera stream.
+It creates `dist/pi-ready.tar.gz` with Pi source and documentation, excluding private settings, installed environments and binaries. Copying source on the computer alone does not update a running Pi.
 
-## Where to look
-
-| Topic | Guide |
-|---|---|
-| Current changes, module map and verification results | [Ready-to-run audit](Documents/READY_TO_RUN.md) |
-| Backend commands, ownership and auto behavior | [Backend README](Backend/README.md) |
-| Fire model, chat and model replacement | [ML README](ML/README.md) |
-| UI, direct video and advanced standalone settings | [Frontend README](Frontend/README.md) |
-| Bookworm, hardware, camera and speaker | [Pi README](PI/README.md) |
-
-Computer logs are in `logs/frontend.log`, `logs/backend.log` and `logs/ml.log`. `.runtime/stack.json` records the current console address. The sibling `.verification` directory is developer tooling and is **not** a startup dependency or part of the Pi bundle.
-
-Older documents retain design and troubleshooting history. The instructions above and the ready-to-run audit describe the current automatic startup.
+Dated test results and physical verification limits are recorded in [Testing](Documents/TESTING_AND_TROUBLESHOOTING.md) and [Hardware](Documents/HARDWARE.md).

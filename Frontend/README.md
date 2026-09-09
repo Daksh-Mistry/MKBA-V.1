@@ -6,7 +6,7 @@ The frontend consists of one Node.js server and a browser application. The serve
 
 ## Startup and configuration
 
-For normal use, start the repository launcher. It installs the runtime, creates matching credentials, starts Backend/ML/Frontend and opens the local console automatically. The printed/opened URL is authoritative: the launcher selects free ports, normally preferring frontend port 3001 or an existing saved port. No copied login token or LLM API key is required. See [Getting started](../Documents/GETTING_STARTED.md).
+For normal use, start the repository launcher. It installs the runtime, creates matching credentials, starts Backend/ML/Frontend and opens the local console automatically. The printed/opened URL is authoritative: the launcher prefers the configured frontend port if available. A new configuration uses port 3000 from `.env.example`; the launcher's missing/invalid-setting fallback is 3001. No copied login token or LLM API key is required. See [Getting started](../Documents/GETTING_STARTED.md).
 
 For a prepared development environment, run from the repository root:
 
@@ -77,7 +77,7 @@ Every backend WebSocket connection receives its own session ID. Reconnect clears
 | Start / Pause detection | Sends selected detector ID or stops vision. Selecting the dropdown alone does not load a model. |
 | Speak on Pi speaker | Opt-in per chat request. Uses the backend/Pi speaker path, not browser speech synthesis. |
 | Stop voice | Any connected viewer can request speech cancellation independently. |
-| Shut down Pi script | Owner-only confirmation; exits the Pi script after stopping outputs, not the OS. |
+| Shut down Pi script | Owner-only confirmation; exits the Pi script after stopping outputs, not the OS or a separately started camera streamer. |
 
 Motor, servo and pump controls follow separate backend readiness values. Missing motors/sensors do not disable a healthy face or pump. The UI shows per-component failure reasons and unknown values instead of substituting successful hardware states. IR inputs without observed signal changes show **Input unverified**; digital flame signals are not a claim that a flame sensor is physically attached. See [Hardware](../Documents/HARDWARE.md).
 

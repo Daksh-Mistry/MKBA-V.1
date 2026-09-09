@@ -4,9 +4,11 @@
 
 ## Normal setup needs no configuration edits
 
-Use `START_ROBO.cmd` on the computer and `bash start_robo.sh` on the Pi. The computer creates consistent private service settings and discovers the Pi. The only optional normal-user entry is `CHAT_API_KEY` in the root `.env` for broader conversation. Leave it blank for local chat.
+Use `START_ROBO.cmd` on the computer and `bash start_robo.sh` for the Pi API. Start video separately with `bash start_camera.sh` in another Pi terminal. The computer creates consistent private service settings and discovers the Pi. The only optional normal-user entry is `CHAT_API_KEY` in the root `.env` for broader conversation. Leave it blank for local chat.
 
 Settings below are for debugging or deliberate architecture changes. They are not extra prerequisites for running Robo.
+
+`PI_CAMERA_ENABLED` is retained only for compatibility with older configuration. Neither Pi launcher uses it to enable video. Start or stop `start_camera.sh` explicitly; it needs no Python environment. The API and camera use separate locks in `PI/bin/` and have independent lifetimes.
 
 ## Where settings live
 
@@ -90,7 +92,7 @@ Do not mix these tokens or paste private `.env` files into reports. Local sign-i
 | `.venv/` | Computer Python environment; tied to its platform/base interpreter. Rebuild rather than copying between machines. |
 | `ML/models/weights/` | Verified local model artifacts. Keep revision/hash information with a custom artifact. |
 | `logs/` | Appended computer service logs. No built-in log rotation; retain only what your deployment needs. |
-| `PI/.venv`, `PI/bin/` | Pi environment, streamer and setup/discovery artifacts. Created locally on Pi. |
+| `PI/.venv`, `PI/bin/` | Pi environment and camera binary; `bin/setup.log` contains the latest setup output, `bin/discovery.log` contains discovery output, and API/camera have separate launcher locks. Created locally on Pi. |
 | `dist/pi-ready.tar.gz` | Generated source bundle, ignored by Git. Rebuild after Pi or documentation changes. |
 | Component/root `.env` | Private configuration. Back up separately with appropriate access controls. |
 
@@ -101,7 +103,7 @@ OS-held locks release after a crashed process exits. Do not delete a lock file t
 1. Stop robot actions and the affected launchers.
 2. Keep a known-good source revision, private settings and custom model registry/artifacts for rollback. Do not restore an old in-memory action/session.
 3. Update the computer source. Run `START_ROBO.cmd -Check`; dependency changes are detected by the recipe/signature.
-4. Rebuild `dist/pi-ready.tar.gz` with `scripts/package_pi.py`, copy/extract it over the chosen Pi source directory, then run the Pi launcher. It preserves excluded settings/environments and performs its setup checks.
+4. Rebuild `dist/pi-ready.tar.gz` with `scripts/package_pi.py`, copy/extract it over the chosen Pi source directory, then run the Pi API and independent camera launchers. The bundle preserves excluded settings/environments; the API launcher performs setup checks and the camera launcher verifies its own streamer.
 5. Start the computer stack and verify service identity, model availability, keyless chat and read-only telemetry before resuming hardware actions.
 
 The current `.service` file under Pi is an optional systemd **template** with user/path placeholders from an older deployment. It is not installed by copying the repository. Follow the Pi guide if deliberately adopting systemd and choose one supervisor; do not launch duplicate controllers.

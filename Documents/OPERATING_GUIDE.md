@@ -21,13 +21,13 @@ Open **Control availability & auto operating check** when a button is disabled. 
 
 Local sign-in is automatic through the frontend. Several browser sessions can view data/video, but one session owns control at a time. Click **Take control**, inspect the current state, then **Resume** when the required hardware checks pass.
 
-Reconnecting does not reclaim or resume control. Closing the owner page, losing its heartbeat or releasing ownership stops actions. Resume does not bypass missing hardware, stale readings, unverified IR signals or auto requirements.
+Reconnecting does not reclaim or resume control. Closing the owner page, losing its heartbeat or releasing ownership stops actions. Manual Resume can succeed with some components or IR evidence missing; those individual actions remain unavailable. Resume does not bypass action-specific checks. Auto has its own stricter prerequisites.
 
 Any signed-in viewer can request **Stop robot**. Ordinary motion and pump commands require ownership; even the separate **Turn pump off** command is owner-only. Viewers should use **Stop robot** when they need all actions stopped.
 
 ## Manual movement
 
-1. Select Manual, take control and resume.
+1. Take control, select Manual and resume.
 2. Hold a drive button or **W/A/S/D**. The UI refreshes the drive request while held.
 3. Release the key/button to stop. Hiding the tab, losing focus, cancellation or disconnection also clears held movement.
 4. Use the speed slider to change requested speed. Backend limits still apply.
@@ -40,7 +40,7 @@ Face arrows request a small **relative 5-degree step**, not an absolute final an
 
 ## Camera and detections
 
-Click **Connect video** if needed. **Open camera** opens the Pi's own viewer for diagnosis. The browser receives WebRTC directly from MediaMTX; Backend/Frontend do not relay the video bytes.
+Start `bash start_camera.sh` in a separate Pi terminal, then click **Connect video** if needed. **Open camera** opens the Pi's own viewer for diagnosis. The browser receives WebRTC directly from MediaMTX; Backend/Frontend do not relay the video bytes. The Pi API and camera launchers run independently; API shutdown does not stop that camera launcher.
 
 The control owner can choose a registered model while stopped, then start detection. ML reads the configured RTSP source directly. An installed model and an online ML API do not guarantee camera readiness. The model selector does not load a new model merely because its highlighted option changed.
 
@@ -54,7 +54,7 @@ The automatic controller is ordinary code in Backend. It uses pretrained fire de
 
 Before auto use, the stopped control owner must perform and confirm the camera/nozzle alignment check in the UI. This records an operator assertion, not machine-measured calibration. Relevant component loss or Pi reconnection invalidates it. Auto also needs servos, pump, usable IR inputs and fresh valid ML results. Motors are not needed for this stationary policy.
 
-Select Auto and explicitly Resume once ready. The current policy:
+Select Auto and explicitly Resume once ready. Keep the controlling browser open and connected: auto still requires its heartbeat. The current policy:
 
 1. Scans pan through a bounded region when it sees no fire.
 2. Requires repeated qualifying fire detections before selecting a target.

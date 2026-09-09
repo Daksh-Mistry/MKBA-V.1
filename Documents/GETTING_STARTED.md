@@ -9,7 +9,7 @@ This guide starts with a project folder on a Windows computer and Raspberry Pi O
 | Machine | Runs | What you start |
 |---|---|---|
 | Windows x64 computer | Frontend, Backend, ML and their supervisor | `START_ROBO.cmd` |
-| Raspberry Pi, Bookworm 64-bit | Hardware API, camera streamer and local speech | `bash start_robo.sh` inside `PI` |
+| Raspberry Pi, Bookworm 64-bit | Hardware API/discovery and local speech; independent camera streamer | `bash start_robo.sh`, plus `bash start_camera.sh` in a second terminal for video |
 | Browser on the computer | Control screen and direct camera playback | Opens automatically with the computer launcher |
 
 The first installation downloads runtime packages and model weights. Give both machines internet access for installation and a network connection to each other for operation. A camera, motors, sensors and speaker are optional for starting the API; their features require the corresponding connected, powered hardware.
@@ -54,7 +54,17 @@ bash start_robo.sh
 
 Use your normal Pi account. First setup can ask for that account's sudo password to install OS packages. Leave the terminal open. The same command handles first installation, later starts and dependency repairs.
 
-It prepares Python, GPIO access, I2C, sensor-pin compatibility, camera/audio tools and network discovery. It downloads a verified MediaMTX streamer. Subsequent starts reuse the installation. An exceptional OS state may still require a reboot; the launcher reports it instead of rebooting automatically.
+It prepares Python, GPIO access, I2C, sensor-pin compatibility, camera/audio prerequisites and network discovery. Setup details are written to `PI/bin/setup.log`. Subsequent starts reuse the installation. An exceptional OS state may still require a reboot; inspect the setup log instead of assuming the interface is ready.
+
+For video, open a **second Pi terminal**, enter the same `PI` folder and run:
+
+```bash
+bash start_camera.sh
+```
+
+This independent launcher downloads/verifies MediaMTX when needed and starts the camera stream. It needs no Python environment, running API or LLM key. Keep both terminals open when using the complete robot. Stopping the API leaves video running; stopping the camera leaves the API running. If no camera is connected, leave the camera launcher stopped.
+
+The API terminal shows controller connections/disconnections, normalized commands and robot errors. Heartbeats and routine HTTP requests are hidden; repeated identical drive commands appear at most once per second. Camera messages/errors appear in the camera terminal. This only changes logging, not command execution or the existing timeouts.
 
 On the Pi, these read-only checks should return JSON:
 
@@ -109,11 +119,12 @@ Custom providers, model names, precedence and offline servers are documented in 
 
 | Action | Effect |
 |---|---|
-| UI **Stop robot**, or Escape outside text entry as handled by the UI | Stops actions, pump and speech; centers the face; keeps servers running. |
+| UI **Stop robot**, or Escape (including while typing) | Stops actions, pump and speech; centers the face; keeps servers running. |
 | Ctrl+C in the computer launcher window | Stops the computer services it started; the Pi connection/watchdogs stop robot actions. The Pi API remains separately managed. |
-| Ctrl+C in the Pi launcher terminal | Stops that Pi launcher's API and camera processes. |
-| Backend/Pi `system: shutdown` command | Exits the Pi script/launcher, not the Pi OS. This is a protocol command; see the API guides. |
-| Starting both launchers again | Reconnects services with actions stopped; ownership/resume must be renewed. |
+| Ctrl+C in the Pi API launcher terminal | Stops the API and discovery; the independently launched camera continues. |
+| Ctrl+C in the Pi camera launcher terminal | Stops camera streaming; the API continues. |
+| Backend/Pi `system: shutdown` command | Exits the Pi API script/launcher, not the Pi OS or independent camera. This is a protocol command; see the API guides. |
+| Restarting the computer and Pi API launchers | Reconnects services with actions stopped; ownership/resume must be renewed. Start the camera separately if needed. |
 
 Use the OS's normal shutdown procedure before disconnecting Pi power. The API `shutdown` command is not an OS power-off command.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 
@@ -16,6 +17,8 @@ from api.websocket import (
     websocket_router, set_robot_reference, broadcast_telemetry_loop,
     close_connections,
 )
+
+logger = logging.getLogger("pi")
 
 
 class RobotServerManager:
@@ -54,6 +57,7 @@ class RobotServerManager:
             print("SIMULATION: GPIO, I2C, camera and speaker hardware are not tested")
 
     def _hardware_failure(self, exc):
+        logger.error("Hardware failure: %s", exc)
         self.faults = (self.faults + [str(exc)])[-8:]
         self.safe_mode("hardware_error")
 
@@ -145,6 +149,7 @@ class RobotServerManager:
         # Repeated on commands never extend the current burst.
 
     def safe_mode(self, reason="system_stop"):
+        logger.info("Stop (%s): stopping motors, switching pump off and centering available servos", reason)
         if reason in ("control_timeout", "watchdog_hardware_error", "telemetry_error", "hardware_error"):
             self.trip_count += 1
             self.last_trip_reason = reason
@@ -160,6 +165,7 @@ class RobotServerManager:
                 if self.hardware.parts[component].available:
                     self.hardware.call(component, action)
             except Exception as exc:
+                logger.error("Stop failed for %s.%s: %s", component, action, exc)
                 output_failed = True
                 self.faults = (self.faults + [f"{component}.{action}: {exc}"])[-8:]
         if output_failed and not self.control_expired:
@@ -174,11 +180,13 @@ class RobotServerManager:
             self.last_control = None
             self.safe_mode("control_timeout")
         if self.drive_deadline is not None and now >= self.drive_deadline:
+            logger.info("Drive timeout: stopping motors after %.0f ms without a drive command", config.DRIVE_TIMEOUT * 1000)
             self.drive_expiry_count += 1
             self.drive_deadline = None
             self.safety_reason = "drive_timeout"
             self._hardware_action("motors", "stop")
         if self.pump_deadline is not None and now >= self.pump_deadline:
+            logger.info("Pump timeout: switching pump off after %.0f ms; send pump off before another burst", config.PUMP_MAX_ON * 1000)
             self.pump_expiry_count += 1
             self.pump_deadline = None
             self.pump_requires_off = True
@@ -190,6 +198,7 @@ class RobotServerManager:
             try:
                 self.check_deadlines()
             except Exception as exc:
+                logger.error("Watchdog failed: %s", exc)
                 self.faults = (self.faults + [f"watchdog: {exc}"])[-8:]
                 self.safe_mode("watchdog_hardware_error")
             if self.connected and self.control_expired:
@@ -227,6 +236,7 @@ class RobotServerManager:
         await self.speech.stop()
         self._close_hardware()
         set_robot_reference(None)
+        logger.info("Pi API stopped; hardware cleanup finished")
 
 
 class SpeechRequest(BaseModel):
@@ -297,6 +307,9 @@ def create_app(manager=None):
 app = create_app()
 
 if __name__ == "__main__":
-    server = uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT, log_level="info", ws_max_size=4096))
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    logger.info("Starting Pi API on http://%s:%s (WebSocket /ws)", config.HOST, config.PORT)
+    server = uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT,
+                                         log_level="warning", access_log=False, ws_max_size=4096))
     app.state.shutdown_callback = lambda: setattr(server, "should_exit", True)
     server.run()

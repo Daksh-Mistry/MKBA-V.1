@@ -1,5 +1,5 @@
 [Unit]
-Description=Robo Pi API and camera (edit user and paths before installing)
+Description=Robo Pi API and discovery (edit user and paths before installing)
 After=network-online.target
 Wants=network-online.target
 
