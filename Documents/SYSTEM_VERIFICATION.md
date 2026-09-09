@@ -1,5 +1,7 @@
 # System verification record
 
+> **Latest results:** See [READY_TO_RUN.md](READY_TO_RUN.md) for the automatic-startup verification, 248 current regression tests, full-stack media checks and current live-Pi limits. The entries below preserve earlier verification history.
+
 Date: 2026-09-09. This supersedes the earlier Pi-only and ML-only verification notes for the current checkout. Setup is in the [root README](../README.md), behavior/module ownership in the [system guide](SYSTEM_IMPLEMENTATION.md), and physical commissioning in [Pi hardware acceptance](PI_HARDWARE_ACCEPTANCE.md).
 
 > **Later Pi update:** [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md) records version 2.3, removal of Pi tokens, automatic sensor reads, 54 Pi tests and a fresh server run without `.env` or hardware. Backend (43), configuration (11) and full-stack integration (16 scenarios) also pass after Pi-token removal. The older counts below describe the earlier baseline; neither run establishes partial-hardware UI support or physical hardware acceptance.

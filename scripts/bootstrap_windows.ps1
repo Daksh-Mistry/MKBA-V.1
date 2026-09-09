@@ -10,7 +10,6 @@ New-Item -ItemType Directory -Path $roboRuntime -Force | Out-Null
 $roboInstallLock = $null
 
 function Get-VerifiedExecutable($Url, $Sha256, $ArchiveName, $EntryName, $Destination) {
-    if (Test-Path -LiteralPath $Destination) { return }
     $archive = Join-Path $roboRuntime $ArchiveName
     if (-not (Test-Path -LiteralPath $archive) -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Sha256) {
         Write-Host "Downloading $ArchiveName from its official release..."
@@ -20,12 +19,26 @@ function Get-VerifiedExecutable($Url, $Sha256, $ArchiveName, $EntryName, $Destin
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Sha256) { throw "Checksum failed: $ArchiveName" }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+    $temporary = "$Destination.installing"
     try {
         $entries = @($zip.Entries | Where-Object { $_.Name -eq $EntryName })
         if ($entries.Count -ne 1) { throw "Unexpected executable layout: $ArchiveName" }
+        $entryStream = $entries[0].Open()
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try { $expected = [BitConverter]::ToString($hasher.ComputeHash($entryStream)).Replace('-', '') }
+        finally { $entryStream.Dispose(); $hasher.Dispose() }
+        if ((Test-Path -LiteralPath $Destination) -and (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -eq $expected) { return }
         # Extract only the named executable, never paths supplied by the archive.
-        [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $Destination, $true)
-    } finally { $zip.Dispose() }
+        # An interrupted extraction never replaces a usable executable. Existing
+        # partial files from older installers are repaired against the verified ZIP.
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $temporary, $true)
+        if ((Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash -ne $expected) { throw "Extracted checksum failed: $EntryName" }
+        if (Test-Path -LiteralPath $Destination) { [IO.File]::Replace($temporary, $Destination, [NullString]::Value) }
+        else { [IO.File]::Move($temporary, $Destination) }
+    } finally {
+        $zip.Dispose()
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
 }
 
 try {

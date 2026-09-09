@@ -129,8 +129,15 @@ def check_ports(env, simulate):
                 raise ValueError(f"Port {port} is already in use; stop its existing service first") from None
 
 
+def pi_address_changed(configured_url: str, pi: dict) -> bool:
+    """Compare endpoints independent of IPv6 URL brackets."""
+    configured = urlsplit(configured_url)
+    return (configured.hostname, configured.port or 80) != (pi['host'], pi['port'])
+
+
 def main() -> int:
     from startup import InstanceLock, discover_pi, prepare_settings, select_ports, use_pi
+    from windows_processes import install_parent_death_cleanup
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulate", action="store_true", help="Use fake Pi hardware; video needs a separate synthetic publisher")
     parser.add_argument('--no-browser', action='store_true', help='Run services without opening a browser')
@@ -154,6 +161,9 @@ def main() -> int:
             pass
         return 0
     try:
+        # Every subsequently created service/descendant belongs to this Windows
+        # Job from birth, so closing/crashing the launcher cannot orphan servers.
+        install_parent_death_cleanup()
         prepare_settings(ROOT)
         env = environment(args.simulate)
         select_ports(env, args.simulate)
@@ -165,7 +175,7 @@ def main() -> int:
                 print(f"Pi found: {pi['host']} (API {pi['version']})", flush=True)
             else:
                 print('Pi is not reachable yet. The console will still open; discovery retries automatically.', flush=True)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         instance.close()
         raise SystemExit(str(exc)) from None
     commands = [("ml", module_command("ML"), ROOT),
@@ -219,7 +229,7 @@ def main() -> int:
                         opened = True
             if not args.simulate and time.monotonic() >= next_discovery:
                 pi = discover_pi(env.get('ROBO_PI_HTTP_URL', ''), timeout=1.0)
-                if pi and f"http://{pi['host']}:{pi['port']}" != env['ROBO_PI_HTTP_URL']:
+                if pi and pi_address_changed(env['ROBO_PI_HTTP_URL'], pi):
                     # A changed address needs new camera/control clients. Stop
                     # backend first; restart only these two, preserving UI login.
                     for name, child in sorted(children, key=lambda pair: pair[0] != 'backend'):

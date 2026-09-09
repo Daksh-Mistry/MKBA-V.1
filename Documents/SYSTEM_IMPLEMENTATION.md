@@ -1,5 +1,7 @@
 # Implemented system and audit map
 
+> **Current startup update:** [READY_TO_RUN.md](READY_TO_RUN.md) records automatic installation/discovery, local sign-in, working keyless chat, and integrated partial-hardware support. It supersedes the older manual setup and readiness statements below. Start with the [root README](../README.md).
+
 Updated 2026-09-09. This describes the current code. [Root setup](../README.md), [verification record](SYSTEM_VERIFICATION.md) and [hardware acceptance](PI_HARDWARE_ACCEPTANCE.md) are the operational references. The older architecture plans record earlier proposals.
 
 > **Pi 2.3 update:** Normal partial-hardware startup, no Pi token or required `.env`, all eight sensor inputs read automatically, and per-pin diagnostic evidence. Backend/launcher Pi-token checks are removed. See [PI_PARTIAL_HARDWARE.md](PI_PARTIAL_HARDWARE.md). The backend still conservatively rejects nullable servo/pump state; partial-hardware UI handling remains a later integration task. Use Pi `/status` and its diagnostic now.

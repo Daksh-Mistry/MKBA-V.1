@@ -2,7 +2,11 @@
 
 The control room is a small browser application with a separate Node.js server. It displays direct Pi video, robot state, movement controls, fire/smoke boxes and conversation. All robot commands and non-video data go through the backend. The frontend never receives the chat provider's API key.
 
-## Start from scratch
+## Normal startup
+
+Double-click the project's `START_ROBO.cmd`. It installs the runtime, creates matching settings, starts all three computer services, and opens the local UI with automatic sign-in. No copied token or API key is required. See the [project startup guide](../README.md).
+
+## Advanced standalone startup
 
 1. Install Node.js 22 or later. This service uses Node built-ins and browser APIs; there are no npm dependencies to install.
 2. Copy `Frontend/.env.example` to `Frontend/.env`.
@@ -33,10 +37,11 @@ The `.env` file is loaded relative to `server.mjs`, regardless of your working d
 | `ROBO_SERVICE_TOKEN` | Required | Private backend bearer token; at least 24 characters. |
 | `ROBO_BACKEND_URL` | `http://127.0.0.1:8100` | Backend origin; HTTP/HTTPS, no URL credentials or path. |
 | `FRONTEND_HOST` | `127.0.0.1` | Bind interface. |
+| `FRONTEND_LOCAL_ACCESS` | `false` standalone; automatic launcher sets `true` | Same-origin local sign-in without a copied token; permitted only on a loopback bind. |
 | `FRONTEND_PORT` | `3000` | HTTP port. |
 | `FRONTEND_ORIGINS` | Empty | Additional exact browser origins, separated by commas. Localhost and 127.0.0.1 origins for the configured port are always allowed. |
 
-The default is for a browser on the same computer. To make a LAN browser connect, configure the bind interface and add its exact frontend origin (for example `http://192.168.1.10:3000`). A non-localhost HTTP origin is not a secure browser context on all browsers; use a trusted HTTPS reverse proxy for remote use. Its public HTTPS origin must be allowed, and the Pi's direct WHEP endpoint must also be reachable over an appropriate HTTPS origin. This server does not provision certificates, remote tunnels or TURN.
+The default is for a browser on the same computer. For advanced LAN access, set `FRONTEND_LOCAL_ACCESS=false`, configure the bind interface and add the exact frontend origin (for example `http://192.168.1.10:3000`). LAN sign-in uses the console token. A non-localhost HTTP origin is not a secure browser context on all browsers; use a trusted HTTPS reverse proxy for remote use. Its public HTTPS origin must be allowed, and the Pi's direct WHEP endpoint must also be reachable over an appropriate HTTPS origin. The automatic launcher restores local-only settings; use standalone service startup for custom LAN configuration. This server does not provision certificates, remote tunnels or TURN.
 
 ## What the UI does
 
