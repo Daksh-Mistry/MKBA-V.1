@@ -8,6 +8,8 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -45,7 +47,9 @@ class DownloadTests(unittest.TestCase):
 
     def assert_no_partial(self):
         self.assertEqual(list(self.root.rglob(".download-*")), [])
-        self.assertFalse((self.root / ".model-download.lock").exists())
+        # The persistent lock file is harmless once the OS lock is released.
+        with installer._installation_lock(self.root / ".model-download.lock"):
+            pass
         self.assertFalse((self.root / "weights" / f"{installer.MODEL_ID}.pt").exists())
 
     def test_verified_download_registered_and_repeat_skips_network(self):
@@ -142,6 +146,49 @@ class DownloadTests(unittest.TestCase):
             installer.download_model(self.root, opener=self.opener)
         self.assertEqual(path.read_text(encoding="utf-8"), '{"models": "bad"}')
         self.assert_no_partial()
+
+    def test_stale_marker_file_never_blocks_fresh_or_cached_install(self):
+        self.root.mkdir(parents=True)
+        marker = self.root / ".model-download.lock"
+        marker.write_bytes(b"old installer marker")
+        target = installer.download_model(self.root, opener=self.opener)
+        self.assertEqual(target.read_bytes(), self.payload)
+        self.assertTrue(marker.exists())
+        def no_network(*args, **kwargs):
+            self.fail("Cached checkpoint must be verified locally")
+        self.assertEqual(installer.download_model(self.root, opener=no_network), target)
+
+    def test_live_installer_blocks_another_process_then_releases_normally(self):
+        self.root.mkdir(parents=True)
+        marker = self.root / ".model-download.lock"
+        code = ("import sys;from pathlib import Path;from ML.download_model import _installation_lock;"
+                "lock=_installation_lock(Path(sys.argv[1]));lock.__enter__();"
+                "print('locked',flush=True);sys.stdin.read(1);lock.__exit__(None,None,None)")
+        process = subprocess.Popen([sys.executable, "-u", "-c", code, str(marker)],
+                                   cwd=Path(installer.__file__).parents[1], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(process.stdout.readline().strip(), "locked")
+            with self.assertRaisesRegex(RuntimeError, "Another model installer is running"):
+                installer.download_model(self.root, opener=self.opener)
+            self.assertFalse((self.root / "registry.json").exists())
+            process.communicate("x", timeout=10)
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(installer.download_model(self.root, opener=self.opener).read_bytes(), self.payload)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=10)
+
+    def test_crashed_installer_releases_lock_automatically(self):
+        self.root.mkdir(parents=True)
+        marker = self.root / ".model-download.lock"
+        code = ("import os,sys;from pathlib import Path;from ML.download_model import _installation_lock;"
+                "lock=_installation_lock(Path(sys.argv[1]));lock.__enter__();os._exit(0)")
+        subprocess.run([sys.executable, "-c", code, str(marker)],
+                       cwd=Path(installer.__file__).parents[1], timeout=10, check=True)
+        self.assertTrue(marker.exists())
+        self.assertEqual(installer.download_model(self.root, opener=self.opener).read_bytes(), self.payload)
 
 
 if __name__ == "__main__":

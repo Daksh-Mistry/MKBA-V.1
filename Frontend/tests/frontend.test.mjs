@@ -9,7 +9,7 @@ import { HoldDrive, containedRectangle, validBox } from '../public/control.js';
 const uiToken = 'ui-test-only-token-with-more-than-24-characters';
 const serviceToken = 'service-test-only-token-with-more-than-24-characters';
 
-async function fixture(t, ttl = 60_000) {
+async function fixture(t, ttl = 60_000, localAccess = false) {
   const received = [];
   const backend = http.createServer((req, res) => {
     received.push(req.headers);
@@ -25,7 +25,7 @@ async function fixture(t, ttl = 60_000) {
   });
   backend.listen(0, '127.0.0.1'); await once(backend, 'listening');
   const origins = new Set();
-  const frontend = createFrontend({ backend: new URL(`http://127.0.0.1:${backend.address().port}`), uiToken, serviceToken, origins, sessionTtlMs: ttl });
+  const frontend = createFrontend({ backend: new URL(`http://127.0.0.1:${backend.address().port}`), uiToken, serviceToken, origins, sessionTtlMs: ttl, localAccess });
   frontend.listen(0, '127.0.0.1'); await once(frontend, 'listening');
   const origin = `http://127.0.0.1:${frontend.address().port}`;
   origins.add(origin);
@@ -56,6 +56,24 @@ test('configuration rejects weak or shared secrets', () => {
   assert.throws(() => settingsFromEnvironment({}), /ROBO_UI_TOKEN/);
   assert.throws(() => settingsFromEnvironment({ ROBO_UI_TOKEN: uiToken, ROBO_SERVICE_TOKEN: uiToken }), /different/);
   assert.throws(() => settingsFromEnvironment({ ROBO_UI_TOKEN: uiToken, ROBO_SERVICE_TOKEN: serviceToken, ROBO_BACKEND_URL: 'file:///tmp' }), /HTTP/);
+});
+test('automatic local login needs no copied token but still requires same origin', async t => {
+  const f = await fixture(t, 60_000, true);
+  assert.equal((await fetch(f.origin + '/login/local', { method: 'POST', body: '{}' })).status, 403);
+  assert.equal((await f.request('/login/local', { method: 'POST', headers: { Origin: 'http://foreign.invalid' }, body: '{}' })).status, 403);
+  const response = await f.request('/login/local', { method: 'POST', body: '{}' });
+  assert.equal(response.status, 200);
+  const cookie = response.headers.get('set-cookie');
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+  assert.equal((await f.request('/api/v1/robot', { headers: { Cookie: cookie.split(';')[0] } })).status, 200);
+  assert.equal(f.received[0].authorization, `Bearer ${serviceToken}`);
+});
+test('automatic access cannot be enabled on a LAN listener and is off unless configured', async t => {
+  assert.throws(() => settingsFromEnvironment({ ROBO_UI_TOKEN: uiToken, ROBO_SERVICE_TOKEN: serviceToken,
+    FRONTEND_HOST: '0.0.0.0', FRONTEND_LOCAL_ACCESS: 'true' }), /loopback/);
+  const f = await fixture(t);
+  assert.equal((await f.request('/login/local', { method: 'POST', body: '{}' })).status, 404);
 });
 test('static UI contains neither secrets nor unsafe inline scripts; unknown assets rejected', async t => {
   const f = await fixture(t);

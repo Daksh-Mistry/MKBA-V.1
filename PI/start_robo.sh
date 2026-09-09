@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 API_PID=""
 MEDIAMTX_PID=""
+DISCOVERY_PID=""
+DOWNLOAD_PID=""
 DOWNLOAD_FILE=""
 TEMP_BINARY=""
 
@@ -12,12 +14,12 @@ cleanup() {
     local status=$?
     trap - EXIT INT TERM
     # Graceful API termination stops hardware and speech before streamer cleanup.
-    for child in "$API_PID" "$MEDIAMTX_PID"; do
+    for child in "$API_PID" "$MEDIAMTX_PID" "$DISCOVERY_PID" "$DOWNLOAD_PID"; do
         if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
             kill -TERM "$child" 2>/dev/null || true
         fi
     done
-    for child in "$API_PID" "$MEDIAMTX_PID"; do
+    for child in "$API_PID" "$MEDIAMTX_PID" "$DISCOVERY_PID" "$DOWNLOAD_PID"; do
         [[ -n "$child" ]] || continue
         for ((attempt=0; attempt<50; attempt++)); do
             kill -0 "$child" 2>/dev/null || break
@@ -41,16 +43,56 @@ if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "aarch64" || "$(dpkg --print-
     exit 1
 fi
 
+# Setup and launch use the same lock, one after the other. A running API's
+# environment must never be repaired underneath it.
+if [[ "${1:-}" != "--prepared" ]]; then
+    if ! bash "$SCRIPT_DIR/setup_pi.sh"; then
+        echo "Some Pi setup steps failed. Checking whether the existing API environment can still run."
+    fi
+
+    # Updating /etc/group does not change the current login's supplementary
+    # groups. Relaunch as the SAME user so GPIO/I2C/video/audio work immediately.
+    # Values remain structured arguments; no user-provided setting becomes code.
+    CURRENT_GROUPS=" $(id -nG) "
+    REGISTERED_GROUPS=" $(id -nG "$(id -un)") "
+    REFRESH_GROUPS=0
+    for group in gpio i2c video audio; do
+        if [[ "$REGISTERED_GROUPS" == *" $group "* && "$CURRENT_GROUPS" != *" $group "* ]]; then
+            REFRESH_GROUPS=1
+        fi
+    done
+    if [[ "$REFRESH_GROUPS" == 1 ]]; then
+        echo "Applying updated device permissions to this launch (no logout required)."
+        OVERRIDES=()
+        for name in PI_HOST PI_PORT PI_SIMULATION PI_SPEECH_DEVICE PI_MOTORS_ENABLED PI_SERVOS_ENABLED PI_PUMP_ENABLED PI_CAMERA_ENABLED XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS; do
+            [[ -v "$name" ]] && OVERRIDES+=("$name=${!name}")
+        done
+        exec sudo -u "$(id -un)" -- env "${OVERRIDES[@]}" bash "$SCRIPT_DIR/start_robo.sh" --prepared
+    fi
+fi
+
 # Prevent duplicate launcher instances, without killing unrelated processes.
 mkdir -p bin
 exec 9>bin/robo-launch.lock
 flock -n 9 || { echo "Another robot launcher is running."; exit 1; }
-[[ -x .venv/bin/python ]] || { echo "Create .venv and install requirements first; see PI/README.md."; exit 1; }
+[[ -x .venv/bin/python ]] || { echo "Pi setup could not create Python. Check the network/package error above and run this same command again."; exit 1; }
 .venv/bin/python -c 'import config, fastapi, uvicorn, dotenv'
 
 echo "Starting Pi API. Hardware availability is reported per component."
 .venv/bin/python server.py &
 API_PID=$!
+
+# Avahi publishes the API's actual port, independently of the Pi's hostname/IP.
+# Its advertisement ends with this launcher; it never takes a control connection.
+if command -v avahi-publish-service >/dev/null; then
+    API_PORT="$(.venv/bin/python -c 'import config; print(config.PORT)')"
+    avahi-publish-service --no-fail "Robo Pi on $(hostname)" _robo._tcp "$API_PORT" \
+        'system=Robo' 'api=2.3' 'path=/' 'ws=/ws' > bin/discovery.log 2>&1 &
+    DISCOVERY_PID=$!
+    echo "Local Pi discovery started (_robo._tcp.local)."
+else
+    echo "Local discovery unavailable; Pi API is still reachable by its hostname/IP."
+fi
 
 MEDIAMTX_VERSION="v1.21.0"
 MEDIAMTX_BIN="$SCRIPT_DIR/bin/mediamtx"
@@ -63,8 +105,25 @@ if [[ "$installed_version" != "$MEDIAMTX_VERSION" ]]; then
     echo "Preparing MediaMTX $MEDIAMTX_VERSION (current: ${installed_version:-missing or unusable})."
     DOWNLOAD_FILE="$(mktemp "$SCRIPT_DIR/bin/mediamtx-download.XXXXXX")" || return 1
     TEMP_BINARY="$(mktemp "$SCRIPT_DIR/bin/mediamtx-binary.XXXXXX")" || return 1
-    curl --fail --location --connect-timeout 5 --max-time 30 --retry 1 --output "$DOWNLOAD_FILE" \
-        "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz" || return 1
+    curl --fail --location --connect-timeout 10 --max-time 300 --retry 2 --retry-delay 2 \
+        --speed-time 30 --speed-limit 1024 --output "$DOWNLOAD_FILE" \
+        "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz" &
+    DOWNLOAD_PID=$!
+    # Allow slow first-run downloads, while still honoring API shutdown promptly.
+    while kill -0 "$DOWNLOAD_PID" 2>/dev/null; do
+        if ! kill -0 "$API_PID" 2>/dev/null; then
+            kill -TERM "$DOWNLOAD_PID" 2>/dev/null || true
+            wait "$DOWNLOAD_PID" 2>/dev/null || true
+            DOWNLOAD_PID=""
+            return 1
+        fi
+        sleep 0.1
+    done
+    if ! wait "$DOWNLOAD_PID"; then
+        DOWNLOAD_PID=""
+        return 1
+    fi
+    DOWNLOAD_PID=""
     # Official v1.21.0 Linux arm64 archive SHA256, pinned with the release.
     echo "a8113b5928ba1a934b81557b61b8a07954b76921a4b567d54c7f086f8b39d9a2  $DOWNLOAD_FILE" | sha256sum --check --status || {
         echo "MediaMTX download checksum did not match; existing binary preserved."

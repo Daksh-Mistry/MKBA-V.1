@@ -4,4 +4,5 @@ __pycache__/
 *.pyc
 models/weights/
 models/*.local.json
+models/.model-download.lock
 .pytest_cache/

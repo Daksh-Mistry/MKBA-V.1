@@ -1,15 +1,17 @@
-import { HoldDrive, containedRectangle, validBox } from './control.js';
+import { HoldDrive, containedRectangle, validBox, controlAvailability } from './control.js';
 import { PiVideo } from './video.js';
 
 const $ = id => document.getElementById(id);
 let socket, sessionId, state = {}, sequence = 0, reconnectTimer, heartbeatTimer, signedIn = false;
 let videoSource, detections = null, detectionsAt = 0, videoConnected = false, toastTimer;
 let lastReceived = 0, retryCount = 0, previousMode = null, pendingChat = null;
+let authenticationRevision = 0;
 const pending = new Map();
 const pendingSpeech = new Map();
 const connected = () => socket?.readyState === WebSocket.OPEN && !!sessionId;
 const ownsControl = () => connected() && state.owner_session_id === sessionId;
-const canDrive = () => ownsControl() && state.pi?.connected && Number(state.pi.age_ms ?? 99999) < 1000 && !state.stopped && state.mode === 'manual' && !document.hidden;
+const controls = () => controlAvailability(state, { online: connected(), owned: ownsControl(), hidden: document.hidden });
+const canDrive = () => controls().drive;
 
 function notify(message) {
   $('toast').textContent = message;
@@ -89,8 +91,9 @@ function updateState(next) {
   render();
 }
 function render() {
-  const online = connected(), owned = ownsControl(), manual = canDrive();
-  const pi = state.pi || {}, ml = state.ml || {}, calibration = state.calibration || {};
+  const online = connected(), owned = ownsControl(), available = controls();
+  const pi = state.pi || {}, ml = state.ml || {};
+  const readiness = state.readiness || {};
   const simulated = pi.simulation === true || pi.simulated === true || state.simulation === true;
   const piFresh = pi.connected && Number(pi.age_ms ?? 99999) < 1500;
   badge('backend-badge', online ? 'Backend connected' : 'Backend offline', online ? 'good' : 'offline');
@@ -98,15 +101,25 @@ function render() {
   badge('ml-badge', ml.ready ? 'ML ready' : ml.connected ? 'ML connected' : 'ML offline', ml.ready ? 'good' : ml.connected ? 'warn' : 'offline');
   $('stop').disabled = !online;
   $('claim').disabled = !online || owned || !!state.owner_session_id;
-  $('resume').disabled = !owned || !piFresh || !state.stopped;
+  $('resume').disabled = !available.resume;
+  $('resume').title = state.mode === 'auto' ? readiness.auto?.reason || '' : readiness.resume?.reason || '';
   $('release').disabled = !owned;
   $('manual-mode').disabled = !owned;
   $('auto-mode').disabled = !owned || !piFresh;
   $('manual-mode').setAttribute('aria-pressed', state.mode !== 'auto');
   $('auto-mode').setAttribute('aria-pressed', state.mode === 'auto');
-  document.querySelectorAll('[data-drive],[data-servo]').forEach(button => { button.disabled = !manual; });
-  $('pump-on').disabled = !manual;
-  $('pump-off').disabled = !online;
+  for (const [kind, enabled] of [['drive', available.drive], ['servo', available.servo]]) {
+    document.querySelectorAll(`[data-${kind}]`).forEach(button => {
+      button.disabled = !enabled; button.title = readiness[kind]?.reason || '';
+    });
+  }
+  $('pump-on').disabled = !available.pump;
+  $('pump-on').title = readiness.pump?.reason || '';
+  $('pump-off').disabled = !owned || !available.fresh || !pi.hardware?.pump?.available;
+  $('alignment-check').disabled = !owned || !state.stopped || !readiness.servo?.available || !readiness.pump?.available || readiness.alignment_confirmed === true;
+  $('alignment-check').textContent = readiness.alignment_confirmed ? 'Operating check recorded' : 'Confirm camera / nozzle check';
+  $('readiness-summary').textContent = ['drive', 'servo', 'pump', 'auto'].map(name =>
+    `${name === 'servo' ? 'Face' : name[0].toUpperCase() + name.slice(1)}: ${readiness[name]?.available ? 'ready' : readiness[name]?.reason || 'waiting for Pi status'}`).join('\n');
   $('vision-start').disabled = !owned || !ml.connected || !$('model-select').value;
   $('vision-stop').disabled = !owned || !ml.connected;
   $('model-select').disabled = !owned || !state.stopped;
@@ -116,20 +129,26 @@ function render() {
   $('shutdown').disabled = !owned;
   $('ownership-label').textContent = owned ? 'Your controls' : state.owner_session_id ? 'Another operator' : 'Viewing';
   let summary = !online ? 'Backend offline. Controls are unavailable.' : !pi.connected ? 'Pi offline. Chat and video can connect independently.' : owned ? state.stopped ? 'You have control. Robo is stopped — press Resume when ready.' : state.mode === 'auto' ? 'Auto is active. Stop robot is always available.' : 'You have control. Hold a direction to move.' : state.owner_session_id ? 'Another operator has control. You can watch, chat or stop the robot.' : 'Viewing only. Take control to operate Robo.';
+  if (online && piFresh && !['drive', 'servo', 'pump'].some(name => readiness[name]?.available)) summary = 'Pi is connected. Hardware controls are unavailable; see the component reasons below. Chat and video can work independently.';
+  else if (owned && !state.stopped && state.mode === 'manual' && !available.drive) summary = 'Your available face and pump controls are ready. Driving is paused until its inputs are ready.';
   if (simulated) summary = `SIMULATION · No physical robot. ${summary}`;
   $('control-summary').textContent = summary;
+  $('hardware-issue').textContent = Object.entries(pi.hardware || {}).filter(([name, part]) => name !== 'sensors' && part.available === false).map(([name, part]) => `${name}: ${part.reason || part.state}`).join(' · ');
+  $('hardware-issue').hidden = !$('hardware-issue').textContent;
   $('control-banner').dataset.level = simulated || !piFresh ? 'warn' : 'normal';
   $('auto-phase').textContent = `Auto ${state.auto?.phase || 'idle'}`;
   const servos = state.servos || {};
-  $('servo-position').textContent = `${servos.pan ?? '—'}° / ${servos.tilt ?? '—'}°`;
+  const angle = value => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : '—';
+  $('servo-position').textContent = `${angle(servos.pan)}° / ${angle(servos.tilt)}°`;
   $('pump-state').textContent = state.pump === true ? 'On' : state.pump === false ? 'Off' : 'Unknown';
   $('sensor-age').textContent = piFresh ? `${Math.round(pi.age_ms || 0)} ms ago` : 'Readings unavailable';
   $('footer-status').textContent = online ? `${state.mode === 'auto' ? 'AUTO' : 'MANUAL'} · ${state.stopped ? 'STOPPED' : 'READY'}${simulated ? ' · SIMULATION' : ''}` : 'RECONNECTING TO BACKEND';
   $('system-details').textContent = [
     `Pi: ${pi.connected ? 'connected' : 'disconnected'}${simulated ? ' (simulation)' : ''} · telemetry age ${pi.age_ms == null ? 'unknown' : `${Math.round(pi.age_ms)} ms`}`,
     `Pi command watchdog: ${pi.watchdog ? 'available' : 'unavailable'}`,
-    `Motion calibration: ${calibration.motion_calibrated ? 'configured' : 'not configured'}`,
-    `Auto calibration: ${calibration.auto_calibrated ? 'configured' : 'not configured'}`,
+    `Robot wiring profile: ${readiness.profile || 'waiting'}`,
+    `Camera/nozzle operating check: ${readiness.alignment_confirmed ? 'recorded' : 'not recorded; manual operation remains available'}`,
+    ...Object.entries(pi.hardware || {}).map(([name, part]) => `${name}: ${part.state || 'unknown'}${part.reason ? ` — ${part.reason}` : ''}${part.presence ? ` (${part.presence.replaceAll('_', ' ')})` : ''}`),
     `ML: ${ml.model_id || 'no model selected'}${ml.error ? ` · ${ml.error}` : ''}`,
     `Stream: ${videoSource?.stream_id || 'not configured'}`,
     'Detection overlay: approximate alignment; stale boxes hidden after 500 ms.',
@@ -145,10 +164,12 @@ function renderSensors(fresh) {
     for (const [index, item] of entries.entries()) {
       const valid = fresh && item.valid === true;
       const detected = group === 'IR' ? item.blocked : item.detected ?? item.active;
-      const value = valid && typeof detected === 'boolean' ? detected ? 'blocked' : 'clear' : 'unknown';
+      const inputUnverified = group === 'IR' && sensors.signal_evidence_required && !item.signal_observed;
+      const value = valid && !inputUnverified && typeof detected === 'boolean' ? detected ? 'blocked' : 'clear' : 'unknown';
       const cell = document.createElement('div'); cell.className = 'sensor-cell'; cell.dataset.state = value;
       const label = document.createElement('span'); label.className = 'sensor-name'; label.textContent = `${group} · ${String(item.position ?? item.name ?? index + 1).replaceAll('_', ' ')}`;
-      const status = document.createElement('span'); status.className = 'sensor-value'; status.textContent = value === 'unknown' ? 'Unknown' : detected ? group === 'IR' ? 'Blocked' : 'Detected' : 'Clear';
+      const status = document.createElement('span'); status.className = 'sensor-value'; status.textContent = inputUnverified && valid ? 'Input unverified' : value === 'unknown' ? 'Unknown' : detected ? group === 'IR' ? 'Blocked' : 'Signal active' : group === 'IR' ? 'Clear' : 'Signal inactive';
+      cell.title = inputUnverified ? 'GPIO is readable but has not changed. Trigger and release this IR sensor to check its signal.' : group === 'Flame' ? 'Digital signal only; this does not prove a sensor is connected or identify a fire.' : 'Clear requires two consecutive clear readings; signal changes do not prove physical attachment.';
       cell.append(label, status); cells.push(cell);
     }
   }
@@ -195,7 +216,7 @@ function connectSocket() {
         if (pendingChat?.id === message.request_id) finishChat(message.message || 'That request could not be completed.', message.status);
       } else if (request && request.type !== 'chat') activity(message.message || `${request.type}: ${message.status}`);
     } else if (message.type === 'chat.reply') {
-      if (pendingChat?.id === message.request_id) finishChat(message.text || 'No reply text received.', message.action_status, message.speech_status);
+      if (pendingChat?.id === message.request_id) finishChat(message.text || 'No reply text received.', message.action_status, message.speech_status, message.chat_mode);
     } else if (message.type === 'error') {
       const error = message.message || message.detail || 'A service reported an error.';
       activity(error); notify(error);
@@ -219,18 +240,20 @@ function connectSocket() {
     pendingSpeech.clear();
     pending.clear(); state = { ...state, pi: { ...state.pi, connected: false } }; render();
     if (signedIn) reconnectTimer = setTimeout(async () => {
-      try { await api('/session'); connectSocket(); }
+      try { if (!await openLocalSession()) await signOut(false); }
       catch (error) { if (signedIn) { activity(error.message); connectSocket(); } }
     }, Math.min(5000, 1000 * ++retryCount));
   };
   next.onerror = () => {};
 }
 async function signIn() {
+  authenticationRevision += 1;
   signedIn = true;
   $('login-screen').hidden = true; $('console-screen').hidden = false;
   connectSocket();
 }
 async function signOut(request = true) {
+  authenticationRevision += 1;
   drive.stop(); send({ type: 'control', command: 'release' });
   signedIn = false; clearTimeout(reconnectTimer); clearInterval(heartbeatTimer);
   socket?.close(); sessionId = null; video.stop(); videoSource = null; state = {}; pending.clear();
@@ -254,6 +277,11 @@ $('login-form').addEventListener('submit', async event => {
 $('logout').addEventListener('click', () => signOut());
 $('claim').addEventListener('click', () => send({ type: 'control', command: 'claim' }, true));
 $('resume').addEventListener('click', () => send({ type: 'control', command: 'resume' }, true));
+$('alignment-check').addEventListener('click', () => {
+  if (window.confirm('Confirm you have checked that the camera and nozzle move together in the shown direction, and that a short stationary water spray is safe in the current area. This records your operating check; it does not automatically calibrate hardware.')) {
+    send({ type: 'readiness', command: 'confirm_alignment' }, true);
+  }
+});
 $('release').addEventListener('click', () => { drive.stop(); send({ type: 'control', command: 'release' }, true); });
 const stopRobot = () => { drive.stop(); send({ type: 'system', command: 'stop' }, true); };
 $('stop').addEventListener('click', stopRobot);
@@ -311,14 +339,14 @@ function updateChatStatus(article, action, speech) {
   if (!note) { note = document.createElement('span'); note.className = 'message-status'; article.append(note); }
   note.textContent = notes.join(' · ');
 }
-function finishChat(text, action, speech) {
+function finishChat(text, action, speech, chatMode) {
   const requestId = pendingChat?.id;
   if (requestId) pending.delete(requestId);
   pendingChat = null;
   const article = appendChat('Robo', text);
   updateChatStatus(article, action, speech);
   if (requestId && speech === 'pending') pendingSpeech.set(requestId, { article, action });
-  $('chat-status').textContent = 'Ready for your next message.';
+  $('chat-status').textContent = chatMode === 'local_basic' ? 'Local chat · no API key needed.' : chatMode === 'llm' ? 'LLM connected · ready for your next message.' : 'Ready for your next message.';
   render();
 }
 $('chat-form').addEventListener('submit', event => {
@@ -368,4 +396,25 @@ function drawOverlay() {
   requestAnimationFrame(drawOverlay);
 }
 requestAnimationFrame(drawOverlay);
-fetch('/session', { credentials: 'same-origin' }).then(response => { if (response.ok) return signIn(); }).catch(() => { $('login-error').textContent = 'The frontend server is unavailable.'; });
+async function openLocalSession() {
+  const revision = authenticationRevision;
+  const session = await fetch('/session', { credentials: 'same-origin' });
+  // A later sign-out or sign-in wins over a delayed automatic renewal.
+  if (revision !== authenticationRevision) return true;
+  if (session.ok) { await signIn(); return true; }
+  if (session.status !== 401) throw new Error('The frontend session service is unavailable.');
+  // The server grants this only to the local computer with local access enabled.
+  // LAN deployments retain the ordinary token login form.
+  const local = await fetch('/login/local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', credentials: 'same-origin' });
+  if (revision !== authenticationRevision) return true;
+  if (local.ok) { await signIn(); return true; }
+  return false;
+}
+$('local-connect').hidden = !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+$('local-connect').addEventListener('click', async () => {
+  $('login-error').textContent = ''; $('local-connect').disabled = true;
+  try { if (!await openLocalSession()) $('login-error').textContent = 'Automatic local access is unavailable for this server. Use its protected login below.'; }
+  catch { $('login-error').textContent = 'The frontend server is unavailable.'; }
+  finally { $('local-connect').disabled = false; }
+});
+openLocalSession().catch(() => { $('login-error').textContent = 'The frontend server is unavailable.'; });

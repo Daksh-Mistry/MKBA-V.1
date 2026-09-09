@@ -6,6 +6,7 @@ Only Python's standard library is needed. The downloaded .pt file is not execute
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -39,6 +40,37 @@ MANIFEST = {
     "source": SOURCE,
     "license": "AGPL-3.0",
 }
+
+
+@contextmanager
+def _installation_lock(path: Path):
+    """Only a live OS lock blocks installation; old marker files are harmless.
+
+    Keep the file after closing: unlinking it could let a third installer lock
+    a different inode while another process still owns the original lock.
+    Windows and POSIX both release these locks if the owning process crashes.
+    """
+    if path.is_symlink():
+        raise ValueError("Model installation lock must not be a symbolic link")
+    handle = path.open("a+b")
+    try:
+        try:
+            handle.seek(0)
+            if not handle.read(1):
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise RuntimeError("Another model installer is running. Wait for it to finish, then retry.") from None
+        yield
+    finally:
+        handle.close()
 
 
 def _verify(path: Path) -> None:
@@ -119,12 +151,7 @@ def download_model(models_dir: Path = MODEL_DIR, *, opener=None) -> Path:
         raise ValueError("weights must be a directory directly inside models")
     registry_path = models_dir / "registry.json"
     lock_path = models_dir / ".model-download.lock"
-    try:
-        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        raise RuntimeError("Another installer is running; if it crashed, remove models/.model-download.lock") from None
-    os.close(lock_fd)
-    try:
+    with _installation_lock(lock_path):
         registry = {"models": []}
         if registry_path.exists():
             # Validate all entries before changing either the registry or files.
@@ -162,8 +189,6 @@ def download_model(models_dir: Path = MODEL_DIR, *, opener=None) -> Path:
         )
         _atomic_text(weights_dir / f"{MODEL_ID}.README.md", card)
         return target
-    finally:
-        lock_path.unlink(missing_ok=True)
 
 
 def main() -> None:

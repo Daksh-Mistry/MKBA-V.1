@@ -1,3 +1,4 @@
-# Computer services. Install an appropriate PyTorch build first (README).
+# Computer services. START_ROBO.cmd prepares Python and CPU PyTorch automatically.
 -r ML/requirements-vision.txt
 -r Backend/requirements.txt
+zeroconf>=0.147,<1

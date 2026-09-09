@@ -78,6 +78,8 @@ class ApiTests(unittest.TestCase):
         data = self.client.get("/health").json()
         self.assertFalse(data["hardware_execution"])
         self.assertFalse(data["chat"]["configured"])
+        self.assertTrue(data["chat"]["available"])
+        self.assertEqual(data["chat"]["mode"], "local_basic")
         self.assertFalse(data["vision"]["ready"])
 
     def test_backend_authentication_required(self):
@@ -219,7 +221,9 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.json()["action_status"], "blocked")
             self.assertIsNone(response.json()["action"])
             chat = client.post("/v1/chat", json=self.request(request_id="talk", message="hello"), headers=self.headers)
-            self.assertEqual(chat.json()["reason_code"], "provider_not_configured")
+            self.assertIsNone(chat.json()["reason_code"])
+            self.assertEqual(chat.json()["chat_mode"], "local_basic")
+            self.assertIn("basic local chat", chat.json()["text"])
 
     def test_real_chat_service_uses_only_fixed_semantic_proposal(self):
         app = create_app(Settings(service_token="test-secret"), engine=self.engine, registry=Registry())

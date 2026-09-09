@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import socket
 import subprocess
 import sys
 import time
+import webbrowser
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -34,8 +36,19 @@ def environment(simulate=False) -> dict:
             if len(values) > 1:
                 raise ValueError(f"{key} does not match between {' and '.join(names)}; run configure.py")
     merged.update(os.environ)
+    # One optional key in the project root is enough; advanced provider options
+    # remain in ML/.env. Existing configured providers are preserved when blank.
+    optional_key = read_settings(ROOT / '.env').get('CHAT_API_KEY', '')
+    if optional_key and 'CHAT_API_KEY' not in os.environ:
+        merged['CHAT_API_KEY'] = optional_key
     merged["PYTHONUNBUFFERED"] = "1"
     merged["PYTHONUTF8"] = "1"
+    for key, folder in (('YOLO_CONFIG_DIR', 'ultralytics'), ('MPLCONFIGDIR', 'matplotlib'), ('TORCH_HOME', 'torch')):
+        path = ROOT / '.runtime' / folder
+        path.mkdir(parents=True, exist_ok=True)
+        merged[key] = str(path)
+    merged['YOLO_OFFLINE'] = 'true'
+    merged['YOLO_AUTOINSTALL'] = 'false'
     # Makes module launching work with both normal and isolated test interpreters.
     merged["PYTHONPATH"] = str(ROOT)
     if simulate:
@@ -81,7 +94,7 @@ def service_environment(env: dict, service: str) -> dict:
     if service == "ml":
         selected = {key for key in env if key.startswith(("ML_", "CHAT_")) or key == "ROBOT_NAME"}
     elif service == "backend":
-        selected = {key for key in env if key.startswith("ROBO_")} - {"ROBO_UI_TOKEN", "ROBO_BACKEND_URL"}
+        selected = {key for key in env if key.startswith("ROBO_")} - {"ROBO_UI_TOKEN", "ROBO_BACKEND_URL", "ROBO_NODE_EXECUTABLE"}
         selected.update(("ML_SERVICE_TOKEN", "ML_STREAM_ID"))
     elif service == "frontend":
         selected = {key for key in env if key.startswith("FRONTEND_")}
@@ -116,17 +129,44 @@ def check_ports(env, simulate):
                 raise ValueError(f"Port {port} is already in use; stop its existing service first") from None
 
 
-def main() -> None:
+def main() -> int:
+    from startup import InstanceLock, discover_pi, prepare_settings, select_ports, use_pi
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulate", action="store_true", help="Use fake Pi hardware; video needs a separate synthetic publisher")
+    parser.add_argument('--no-browser', action='store_true', help='Run services without opening a browser')
     args = parser.parse_args()
-    node = shutil.which("node")
+    node = os.environ.get('ROBO_NODE_EXECUTABLE') or shutil.which("node")
     if not node:
-        raise SystemExit("Install Node.js 22+ for the frontend server")
+        raise SystemExit("Start with START_ROBO.cmd; it prepares the required Node runtime automatically")
+    runtime = ROOT / '.runtime'
+    runtime.mkdir(exist_ok=True)
+    status_path = runtime / 'stack.json'
     try:
+        instance = InstanceLock(runtime / 'stack.lock')
+    except RuntimeError as exc:
+        print(str(exc), flush=True)
+        try:
+            url = json.loads(status_path.read_text())['url']
+            print(url, flush=True)
+            if not args.no_browser:
+                webbrowser.open(url)
+        except (OSError, ValueError, KeyError):
+            pass
+        return 0
+    try:
+        prepare_settings(ROOT)
         env = environment(args.simulate)
-        check_ports(env, args.simulate)
-    except ValueError as exc:
+        select_ports(env, args.simulate)
+        if not args.simulate:
+            print('Finding the Raspberry Pi...', flush=True)
+            pi = discover_pi(env.get('ROBO_PI_HTTP_URL', ''))
+            if pi:
+                use_pi(env, pi)
+                print(f"Pi found: {pi['host']} (API {pi['version']})", flush=True)
+            else:
+                print('Pi is not reachable yet. The console will still open; discovery retries automatically.', flush=True)
+    except (ValueError, OSError) as exc:
+        instance.close()
         raise SystemExit(str(exc)) from None
     commands = [("ml", module_command("ML"), ROOT),
                 ("backend", module_command("Backend"), ROOT),
@@ -139,17 +179,32 @@ def main() -> None:
     log_dir.mkdir(exist_ok=True)
     children, handles = [], []
     exit_code = 0
+    url = f"http://localhost:{env['FRONTEND_PORT']}"
+    def launch(name, command, cwd):
+        log = (log_dir / f"{name}.log").open("a", encoding="utf-8")
+        handles.append(log)
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        child = subprocess.Popen(command, cwd=cwd, env=service_environment(env, name), stdout=log, stderr=subprocess.STDOUT, **kwargs)
+        print(f"Started {name}; log: logs/{name}.log", flush=True)
+        return child
+    def stop(child):
+        if child.poll() is None:
+            child.terminate() if os.name == 'nt' else child.send_signal(signal.SIGINT)
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=3)
     try:
         for name, command, cwd in commands:
-            log = (log_dir / f"{name}.log").open("w", encoding="utf-8")
-            handles.append(log)
-            kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-            child = subprocess.Popen(command, cwd=cwd, env=service_environment(env, name), stdout=log, stderr=subprocess.STDOUT, **kwargs)
+            child = launch(name, command, cwd)
             children.append((name, child))
-            print(f"Started {name}; log: logs/{name}.log", flush=True)
         if args.simulate:
             print("SIMULATION: no physical Pi is connected. Video points only at a local test publisher.", flush=True)
-        print(f"Open http://localhost:{env.get('FRONTEND_PORT', '3000')}. Press Ctrl+C to stop all launched services.", flush=True)
+        status_path.write_text(json.dumps({'url': url, 'running': True, 'pid': os.getpid(), 'simulation': args.simulate}, indent=2))
+        print(f"Open {url}. No login token or LLM API key is required. Ctrl+C stops these services.", flush=True)
+        opened = args.no_browser
+        next_discovery = time.monotonic() + 15
         while True:
             for name, child in children:
                 code = child.poll()
@@ -157,6 +212,26 @@ def main() -> None:
                     print(f"{name} exited ({code}); stopping this stack. Inspect its log.", flush=True)
                     exit_code = code or 1
                     return exit_code
+            if not opened:
+                with socket.socket() as probe:
+                    if probe.connect_ex(('127.0.0.1', int(env['FRONTEND_PORT']))) == 0:
+                        webbrowser.open(url)
+                        opened = True
+            if not args.simulate and time.monotonic() >= next_discovery:
+                pi = discover_pi(env.get('ROBO_PI_HTTP_URL', ''), timeout=1.0)
+                if pi and f"http://{pi['host']}:{pi['port']}" != env['ROBO_PI_HTTP_URL']:
+                    # A changed address needs new camera/control clients. Stop
+                    # backend first; restart only these two, preserving UI login.
+                    for name, child in sorted(children, key=lambda pair: pair[0] != 'backend'):
+                        if name in ('backend', 'ml'):
+                            stop(child)
+                    use_pi(env, pi)
+                    for index, (name, _) in enumerate(children):
+                        if name in ('backend', 'ml'):
+                            command, cwd = next((cmd, path) for tag, cmd, path in commands if tag == name)
+                            children[index] = (name, launch(name, command, cwd))
+                    print(f"Connected services to Pi at {pi['host']}; robot remains stopped until Resume.", flush=True)
+                next_discovery = time.monotonic() + 15
             time.sleep(0.3)
     except KeyboardInterrupt:
         print("Stopping launched services...", flush=True)
@@ -178,6 +253,8 @@ def main() -> None:
                 child.wait(timeout=3)
         for handle in handles:
             handle.close()
+        status_path.write_text(json.dumps({'url': url, 'running': False, 'simulation': args.simulate}, indent=2))
+        instance.close()
     return exit_code
 
 

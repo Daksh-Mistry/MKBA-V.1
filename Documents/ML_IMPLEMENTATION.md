@@ -9,9 +9,9 @@ Updated 2026-09-09. This document details the `ML/` service. Backend, frontend, 
 | Role | Initial choice | Where it runs |
 |---|---|---|
 | Fire/smoke perception | One pretrained YOLOv8n checkpoint; fire and smoke are classes in the same model. | Computer, inside ML's inference worker. |
-| Conversation | One configurable OpenAI-compatible chat API. Provider/model/key supplied in ML/.env. | API provider. An offline model can replace it later. |
+| Conversation | Basic local chat needs no model/key. Optional OpenAI-compatible API defaults to `gpt-4.1-mini`; add only `CHAT_API_KEY` for it. | Local ordinary code by default; optional API provider. An offline model can replace the provider later. |
 
-The earlier three fire-model candidates were alternatives. They were never intended to run together. The small movement parser is ordinary code, not a third ML model. Text chat does not need speech recognition. Pi speaker output uses local espeak-ng and aplay; it does not require another downloaded neural model.
+The earlier three fire-model candidates were alternatives. They were never intended to run together. With no API key, only the one vision model is used. Basic conversation and the small movement parser are ordinary code, not extra ML models. Text chat does not need speech recognition. Pi speaker output uses local espeak-ng and aplay; it does not require another downloaded neural model.
 
 ### Why not automatically choose YOLOv13?
 
@@ -34,7 +34,7 @@ flowchart LR
     B -->|Validated robot commands| R[Pi control API]
 ```
 
-**Implemented:** direct RTSP reader, one-model vision engine, local artifact registry/checksum verification, normalized detection outputs, backend-facing API, conversational provider adapter, robot-context prompt, deterministic gesture proposals, request limits/authentication, diagnostics, downloader/check command and regression tests.
+**Implemented:** direct RTSP reader, one-model vision engine, local artifact registry/checksum verification, normalized detection outputs, backend-facing API, useful keyless local chat, optional conversational provider adapter, robot-context prompt, deterministic gesture proposals, request limits/authentication, diagnostics, downloader/check command and regression tests.
 
 **Now integrated:** backend/frontend clients, stationary autonomous aiming/spray policy, bounded gesture execution, Pi command timeouts, local speaker/TTS and approximate video overlays. Microphone input, tracking, exact synchronized overlays, navigation and distance fusion remain future work. The preserved `Backend/auto_mode.py` uses the older design; run `python -m Backend` for this implementation.
 
@@ -55,6 +55,7 @@ Paths are relative to the repository root.
 | `ML/chat/provider.py` | Text-only compatible HTTP API | Conversation messages → text | Authentication, timeout, unsupported model/parameter. |
 | `ML/chat/service.py` | Robot personality, limited context/history, gesture vs conversation routing | Backend chat request → reply/proposal | Unknown state, unsupported phrasing, provider unavailable. |
 | `ML/chat/actions.py` | Explicit gesture recognition and fixed bounds | One supported phrase + context → proposal or rejection | Auto mode, stale state, missing controller/executor. |
+| `ML/chat/local_basic.py` | Keyless greetings, status/detection summaries, help and simple personality | Text + validated current context → display text only | Limited English phrases; missing/stale status explicitly reported. |
 | `ML/download_model.py` | Explicit pinned artifact installation | Published fixed URL/hash → local checkpoint and registry | Network/checksum/registry conflict. |
 | `ML/check_model.py` | Local model smoke check | Blank frame or local image → JSON detections/timing | Model dependency/loading failure. |
 | `ML/models/registry.json` | Registered model metadata | Model ID → artifact/adapter/revision | Edited config requires service restart. |
@@ -139,6 +140,12 @@ Backend calls `POST http://127.0.0.1:8200/v1/chat` with the same service Authori
 
 The model gets a brief personality instruction plus mode/connectivity/stop state, speaker availability and optional recent detection information. It receives no raw camera frames, Pi credentials, session IDs or complete sensor dumps. It can converse in the robot's voice while being honest about its capabilities. It is not the auto-mode manager and cannot claim a reply was physically heard.
 
+**Without an API key**, `local_basic.py` answers greetings, status, help, detection and speaker questions, thanks, identity and a simple robot joke. It uses no network client and no extra model/process. This mode is explicitly labelled basic local chat. Robot state older than 1 second and detection data older than 750 ms are not described as current. Chat history cannot create an observation or action. Unsupported conversation receives a helpful explanation and example phrases.
+
+The default compatible endpoint and model are preconfigured; adding only `CHAT_API_KEY` enables the optional `gpt-4.1-mini` conversation model ([official model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini)). This is a short-response non-reasoning model choice, not a claim that it is the newest model. Configuration remains replaceable. Blank legacy model fields resolve to the default only at the official default endpoint. A provider failure falls back to local text and retains its redacted error code; the robot services continue running.
+
+Every response adds `chat_mode`: `local_basic`, `llm`, or `bounded_command`. Health distinguishes `chat.available` (the chat capability is always available), `chat.configured` (a model provider has sufficient configuration), and `chat.mode` (`local_basic` or `llm`). Configuration does not prove provider access. ML speech health reports `delivery: "backend_to_pi"` and `hardware_execution: false`; current playback availability is supplied by backend context, not guessed by ML.
+
 Backend supplies at most 12 previous user/assistant messages, each up to 2,000 characters. There is no shared global conversation or disk memory in ML. Backend must keep histories separate per user/session and store any history it wants to retain. Generated text is untrusted display text; never parse embedded JSON or code from it as an action.
 
 Provider calls use a total timeout (20 seconds by default), response-size limit and 384-token output budget. At most four ordinary chat requests can be pending. There are no automatic retries or model tool calls. Known explicit gestures bypass the provider and its congestion; they still produce only backend proposals.
@@ -162,6 +169,7 @@ Example successful **proposal**, not execution:
 {
   "type": "chat.reply", "request_id": "chat-002", "session_id": "operator-001",
   "text": "A small gesture request is ready for the backend. I haven't moved yet.",
+  "chat_mode": "bounded_command",
   "action_status": "proposed", "reason_code": null,
   "action": {
     "action_id": "unique-id", "request_id": "chat-002", "session_id": "operator-001",
@@ -218,7 +226,7 @@ Start with `/health`, then `/models`, then the specific error code. A running HT
 | `inference_failed` | Invalid output or inference freshness budget exceeded; check selected model/device. |
 | Worker unhealthy/still stopping | Native call did not finish; stop results, inspect health, restart ML if it cannot exit. |
 | Empty detections | Valid processed frame with no accepted detections. It is not a guarantee there is no fire. |
-| `provider_not_configured` | Chat base URL, model and API key. Local compatible endpoints may omit key. |
+| `chat_mode: local_basic` | Normal without an API key, or a provider fallback. Status/help/basic conversation and bounded gestures still work. |
 | `provider_authentication` / `provider_rate_limited` | Provider credentials/access or quota; no raw provider body/key is returned. |
 | `provider_http_error` | Provider model name/API compatibility, including token-limit field. |
 | `provider_timeout` / `provider_connection_error` | Provider/runtime reachability; ordinary chat cannot interrupt detection workers. |
@@ -232,9 +240,9 @@ When reporting a fault, include module/error code, request/session ID, model ID,
 
 ## 9. Verification record
 
-- **63 offline regression tests passed.** They cover API authorization/input limits/session cleanup/replay behavior, chat/provider failures, bounded gesture gates, direct-reader/session worker isolation, model labels/coordinates, and download integrity/failure cleanup. Tests use doubles and mock provider responses; they do not actuate hardware or call a paid API.
+- **75 offline regression tests passed.** They cover API authorization/input limits/session cleanup/replay behavior, chat/provider failures, bounded gesture gates, direct-reader/session worker isolation, model labels/coordinates, and download integrity/failure cleanup. Twelve new tests cover keyless conversation without a network client, stale/missing robot and detection context, history isolation, unsupported gestures, speech availability, provider fallback, and key-only default configuration. Tests use doubles and mock provider responses; they do not actuate hardware or call a paid API.
 - The pretrained artifact was downloaded and matched the publisher-listed size/SHA256. Original checkpoint and provenance are retained locally under the ignored weights directory.
 - Actual CPU checkpoint/runtime check **passed** on development Windows Python 3.12 with torch 2.14.0+cpu, torchvision 0.29.0+cpu, ultralytics 8.4.144 and OpenCV 4.14.0.94. A 640x480 synthetic blank frame loaded, warmed and produced a valid empty detection list. A single warmed call measured about 31 ms; this is not an accuracy evaluation or a sustained camera-throughput benchmark. See [tested packages](../ML/requirements-vision-tested.txt). `pip check` passed. Packages were installed in the developer-only `.verification` environment, not system Python.
-- Live cloud chat was not tested: no provider model/API key was supplied. Mock HTTP tests do not establish account access or conversational quality.
+- Live cloud chat was not tested: no API key was supplied. The default model is configured, and keyless local chat was tested. Mock HTTP tests do not establish account access or conversational quality.
 - The later full-stack check exercised direct synthetic RTSP with the real checkpoint and metadata through the backend. The actual Pi camera, physical motion, nozzle/servo calibration, fire-detection accuracy and audible speaker output remain untested.
 - Backend/frontend/Pi integration is now implemented. See [current system verification](SYSTEM_VERIFICATION.md) for complete test results and remaining physical checks.

@@ -7,6 +7,7 @@ import math
 import re
 
 from .actions import proposal, recognize
+from .local_basic import reply as local_reply
 from .provider import ProviderError
 
 
@@ -79,6 +80,10 @@ class ChatService:
         self.provider = provider
         self.robot_name = robot_name
 
+    @property
+    def mode(self) -> str:
+        return "llm" if self.provider is not None and getattr(self.provider, "available", True) else "local_basic"
+
     async def reply(self, request: dict) -> dict:
         allowed = {"request_id", "session_id", "message", "history", "context"}
         if not isinstance(request, dict) or set(request) - allowed:
@@ -106,9 +111,11 @@ class ChatService:
             "type": "chat.reply", "request_id": request["request_id"],
             "session_id": request["session_id"], "text": "", "action": None,
             "action_status": "none", "reason_code": None,
+            "chat_mode": self.mode,
         }
         gesture = recognize(message)
         if gesture is not None:
+            result["chat_mode"] = "bounded_command"
             action, reason = proposal(request, gesture, context)
             result.update(action=action, action_status="blocked" if reason else "proposed", reason_code=reason)
             if reason:
@@ -118,11 +125,8 @@ class ChatService:
             else:
                 result["text"] = "A small gesture request is ready for the backend. I haven't moved yet."
             return result
-        if self.provider is None:
-            result.update(
-                text="My conversation service isn't configured yet. My basic gesture parser is available, but movement still needs the backend.",
-                reason_code="provider_not_configured",
-            )
+        if self.mode == "local_basic":
+            result["text"] = local_reply(message, context, self.robot_name)
             return result
         # Do not send session IDs, endpoints, raw sensors or frames to the model.
         summary = {key: context[key] for key in (
@@ -153,7 +157,9 @@ class ChatService:
             result["text"] = await self.provider.complete(messages)
         except ProviderError as error:
             result.update(
-                text="I couldn't reach a usable conversation response just now. No robot action was requested.",
+                text="My conversational API is unavailable, so I'm using basic local chat. "
+                     + local_reply(message, context, self.robot_name),
+                chat_mode="local_basic",
                 reason_code=error.code,
             )
         return result

@@ -155,7 +155,8 @@ class ChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["reason_code"], "provider_timeout")
         self.assertIsNone(result["action"])
         unconfigured = ChatService()
-        self.assertEqual((await unconfigured.reply(request()))["reason_code"], "provider_not_configured")
+        self.assertIsNone((await unconfigured.reply(request()))["reason_code"])
+        self.assertEqual((await unconfigured.reply(request()))["chat_mode"], "local_basic")
         self.assertEqual((await unconfigured.reply(request("look up")))["action_status"], "proposed")
 
     async def test_close_releases_provider(self):

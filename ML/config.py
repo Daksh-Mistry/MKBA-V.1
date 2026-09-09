@@ -8,6 +8,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
+DEFAULT_CHAT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
 
 
 def _number(name: str, default: float, low: float, high: float) -> float:
@@ -30,8 +32,8 @@ class Settings:
     max_fps: float = 10.0
     backend_timeout: float = 10.0
     robot_name: str = "Robo"
-    chat_base_url: str = "https://api.openai.com/v1"
-    chat_model: str = ""
+    chat_base_url: str = DEFAULT_CHAT_BASE_URL
+    chat_model: str = DEFAULT_CHAT_MODEL
     chat_api_key: str = field(default="", repr=False)
     chat_timeout: float = 20.0
     chat_token_limit_field: str = "max_tokens"
@@ -46,6 +48,12 @@ class Settings:
         parsed = urlsplit(stream)
         if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.hostname:
             raise ValueError("ML_STREAM_URL must be a configured RTSP source")
+        chat_base = os.getenv("CHAT_BASE_URL", DEFAULT_CHAT_BASE_URL).strip() or DEFAULT_CHAT_BASE_URL
+        chat_model = os.getenv("CHAT_MODEL", "").strip()
+        # Older generated .env files used an empty model. At the default endpoint,
+        # adding only the API key now suffices. Custom endpoints keep their model.
+        if not chat_model and chat_base.rstrip("/") == DEFAULT_CHAT_BASE_URL:
+            chat_model = DEFAULT_CHAT_MODEL
         return cls(
             host=os.getenv("ML_HOST", "127.0.0.1"), port=port,
             service_token=os.getenv("ML_SERVICE_TOKEN", ""),
@@ -56,8 +64,8 @@ class Settings:
             max_fps=_number("ML_MAX_FPS", 10, 0.1, 120),
             backend_timeout=_number("ML_BACKEND_TIMEOUT_SECONDS", 10, 1, 60),
             robot_name=os.getenv("ROBOT_NAME", "Robo")[:60],
-            chat_base_url=os.getenv("CHAT_BASE_URL", "https://api.openai.com/v1"),
-            chat_model=os.getenv("CHAT_MODEL", ""),
+            chat_base_url=chat_base,
+            chat_model=chat_model,
             chat_api_key=os.getenv("CHAT_API_KEY", ""),
             chat_timeout=_number("CHAT_TIMEOUT_SECONDS", 20, 1, 60),
             chat_token_limit_field=os.getenv("CHAT_TOKEN_LIMIT_FIELD", "max_tokens"),

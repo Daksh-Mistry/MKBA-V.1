@@ -3,13 +3,21 @@
 This runs on your **computer**. It contains two separate capabilities:
 
 1. **Vision:** one local pretrained fire/smoke detector reading the Pi camera directly over RTSP.
-2. **Chat:** one configured conversational API, with optional offline replacement. Small gesture requests are parsed by ordinary code.
+2. **Chat:** built-in basic local conversation works with no API key or downloaded chat model. An optional configurable conversational API adds broader conversation. Small gesture requests are parsed by ordinary code.
 
 This service returns detections, conversation and **action proposals** to the backend. It has no Pi control connection. The new `python -m Backend` service connects it to the frontend, validated robot control and Pi speaker playback. The preserved `Backend/auto_mode.py` is legacy code; do not run it alongside the new backend.
 
 For ML modules and API examples, open [ML_IMPLEMENTATION.md](../Documents/ML_IMPLEMENTATION.md). Use the [root README](../README.md) to set up all services together and [system guide](../Documents/SYSTEM_IMPLEMENTATION.md) for the current architecture. The whole-system v2 plan is design history.
 
-## Setup on Windows
+## Start the complete project
+
+Use the automatic launcher in the [root README](../README.md). It prepares the shared runtime, local service credentials and pretrained vision artifact. No LLM API key is required. The instructions below are only for developers who want to run ML independently.
+
+Try `hello`, `status`, `what do you see?`, `help`, `can you speak?`, or `tell me a joke`. Basic local chat uses only the current validated backend context; it does not invent observations from the conversation history. Missing, disconnected or stale status is reported as uncertain. Detection scores are model estimates, and an absent detection is never described as proof of safety.
+
+Later, add only `CHAT_API_KEY` to `ML/.env` and restart the stack to enable the default `gpt-4.1-mini` model at `https://api.openai.com/v1`. Blank model fields in older configurations also resolve to this default. It supports short Chat Completions without a reasoning step, which fits the current reply budget ([official model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini)). A valid funded account with model access is needed for provider responses; authentication/quota/network failures fall back to basic local chat with a diagnostic code. The API key is never required to start the servers, run local fire detection or make supported gestures.
+
+## Standalone developer setup on Windows
 
 Use a normal 64-bit Python 3.12 installation. Run these commands from the repository root (`MKBA-V.1`), not from inside `ML`:
 
@@ -25,7 +33,7 @@ For standalone setup, generate a service token and put it in `ML/.env` as `ML_SE
 ML/.venv/Scripts/python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-Set `ML_STREAM_URL=rtsp://<PI_IP>:8554/cam`. Set `CHAT_BASE_URL`, `CHAT_MODEL`, and `CHAT_API_KEY` for your provider. Leave the model/key empty to run diagnostics without cloud chat. Keys stay in the ignored `.env`, never in browser code, registry files or chat requests.
+Set `ML_STREAM_URL=rtsp://<PI_IP>:8554/cam` when running this service independently. Leave `CHAT_API_KEY` empty to use basic local chat. For the default OpenAI connection, add only the key; custom providers may require changing `CHAT_BASE_URL` and `CHAT_MODEL`. Keys stay in the ignored `.env`, never in browser code, registry files or chat requests.
 
 `CHAT_TOKEN_LIMIT_FIELD=max_tokens` suits many compatible endpoints. Set it to `max_completion_tokens` if your provider/model requires that field. The current response budget is 384 tokens; use a conversational model that can produce a short completed response within this limit. Unsupported parameters or incomplete responses produce an explicit provider error, not a robot action.
 
@@ -36,6 +44,8 @@ ML/.venv/Scripts/python.exe -m ML
 ```
 
 Open `http://127.0.0.1:8200/health`. Health working does **not** mean the camera, model or chat provider is ready; they have separate fields. The API schema is at `/docs`. Authenticated operations need `Authorization: Bearer <ML_SERVICE_TOKEN>` and are intended for backend clients without a browser Origin header.
+
+Health reports `chat.available: true` and `chat.mode: "local_basic"` without a provider. `chat.configured` means the external/local model endpoint has sufficient configuration, not that it was contacted successfully. Replies carry `chat_mode`: `local_basic`, `llm`, or `bounded_command`. On provider errors the reply still contains useful local text and preserves the diagnostic `reason_code`. Speech health describes delivery through the backend to the Pi; actual speaker availability comes from current backend context.
 
 ### Add local vision
 

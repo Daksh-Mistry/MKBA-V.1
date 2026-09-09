@@ -122,9 +122,13 @@ async def exercise(base_url, pi_url, backend_url, tokens, media, backend_process
             await asyncio.sleep(0.05)
         assert (await http.get(base_url + "/api/v1/robot")).status_code == 401
         assert (await http.get(backend_url + "/api/v1/robot")).status_code == 401
-        login = await http.post(base_url + "/login", json={"token": tokens["ui"]}, headers={"Origin": base_url})
+        assert (await http.get(base_url + "/session")).status_code == 401
+        denied = await http.post(base_url + "/login/local", json={}, headers={"Origin": "http://foreign.invalid"})
+        assert denied.status_code == 403
+        login = await http.post(base_url + "/login/local", json={}, headers={"Origin": base_url})
         login.raise_for_status()
-        checks.append("frontend login and backend authentication")
+        assert "HttpOnly" in login.headers["set-cookie"]
+        checks.append("automatic local frontend login without user token; same-origin and backend authentication enforced")
         cookie = "; ".join(f"{key}={value}" for key, value in http.cookies.items())
         ws_url = base_url.replace("http:", "ws:") + "/api/v1/ws"
         async with websockets.connect(ws_url, origin=base_url, extra_headers={"Cookie": cookie}) as ws:
@@ -173,6 +177,8 @@ async def exercise(base_url, pi_url, backend_url, tokens, media, backend_process
                 request = await client.send("chat", message="Hello Robo", speak=True)
                 response = await client.wait(lambda event: event.get("type") == "chat.reply" and event.get("request_id") == request)
                 assert response.get("speech_status") == "pending", response
+                assert response.get("chat_mode") == "local_basic" and response.get("reason_code") is None, response
+                assert response.get("action_status") == "none", response
                 spoken = await client.wait(lambda event: event.get("type") == "event" and
                                           event.get("request_id") == request and event.get("code") == "speech_status")
                 assert spoken.get("status") == "accepted", spoken
@@ -227,8 +233,13 @@ async def exercise(base_url, pi_url, backend_url, tokens, media, backend_process
                     await accepted(client, "vision", command="stop")
                 request = await client.send("chat", message="Hello Robo", speak=False)
                 response = await client.wait(lambda event: event.get("type") == "chat.reply" and event.get("request_id") == request)
-                assert isinstance(response.get("text"), str)
-                checks.append("unconfigured cloud provider returns a visible non-actuating reply")
+                assert isinstance(response.get("text"), str) and len(response["text"]) > 10, response
+                assert response.get("chat_mode") == "local_basic" and response.get("reason_code") is None, response
+                assert response.get("action_status") == "none", response
+                state = await snapshot()
+                assert state["stopped"] and not state["drive_active"] and state["pump"] is False, state
+                assert state["servos"] == {"pan": 90, "tilt": 90}, state
+                checks.append("API-key-free local conversation returns normal contextual text without provider error or actuation")
                 await accepted(client, "control", command="resume")
                 await accepted(client, "servo", direction="left", degrees=5)
                 await fresh(lambda state: not state["stopped"] and state["servos"]["pan"] == 95,
@@ -328,7 +339,7 @@ def main():
                ROBO_PI_HTTP_URL=f"http://127.0.0.1:{ports['pi']}", ROBO_ML_URL=f"http://127.0.0.1:{ports['ml']}",
                ROBO_MOTION_CALIBRATED="true", ROBO_AUTO_CALIBRATED="true", ROBO_ALLOW_SIMULATION="true",
                ROBO_IR_BLOCKED_VALUE="0", ROBO_SPEECH_ENABLED="true", FRONTEND_HOST="127.0.0.1",
-               FRONTEND_PORT=str(ports["frontend"]), ROBO_UI_TOKEN=tokens["ui"],
+               FRONTEND_PORT=str(ports["frontend"]), FRONTEND_LOCAL_ACCESS="true", ROBO_UI_TOKEN=tokens["ui"],
                ROBO_BACKEND_URL=f"http://127.0.0.1:{ports['backend']}",
                ROBO_WHEP_URL="http://127.0.0.1:18889/cam/whep", ROBO_VIEWER_URL="http://127.0.0.1:18889/cam")
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0

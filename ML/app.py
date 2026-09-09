@@ -119,8 +119,10 @@ def create_app(settings: Settings | None = None, *, engine=None, chat=None, regi
                 "backend_connected": app.state.inference_owner is not None,
                 "vision": engine.status(),
                 "chat": {"configured": bool(getattr(provider, "available", False)),
-                         "mode": "conversation_and_bounded_proposals"},
-                "speech": {"implemented": False}}
+                         "available": True, "mode": getattr(chat, "mode", "local_basic"),
+                         "bounded_proposals": True},
+                "speech": {"delivery": "backend_to_pi", "hardware_execution": False,
+                           "availability": "provided_per_chat_context"}}
 
     @app.get("/models", dependencies=[Depends(require_backend)])
     async def models():

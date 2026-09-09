@@ -4,6 +4,8 @@
 *.pyc
 logs/
 .run/
+.runtime/
+dist/
 node_modules/
 PI/bin/
 ML/models/weights/

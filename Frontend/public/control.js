@@ -38,3 +38,17 @@ export function containedRectangle(containerWidth, containerHeight, sourceWidth,
 export function validBox(box) {
   return Array.isArray(box) && box.length === 4 && box.every(v => Number.isFinite(v) && v >= 0 && v <= 1) && box[2] > box[0] && box[3] > box[1];
 }
+
+/** Each output follows its own reported readiness; missing parts do not disable healthy ones. */
+export function controlAvailability(state, { online = false, owned = false, hidden = false } = {}) {
+  const fresh = state.pi?.connected === true && Number(state.pi.age_ms ?? Infinity) < 1000;
+  const manual = online && owned && fresh && !state.stopped && state.mode === 'manual' && !hidden;
+  const ready = state.readiness || {};
+  return {
+    fresh, manual,
+    drive: manual && ready.drive?.available === true,
+    servo: manual && ready.servo?.available === true,
+    pump: manual && ready.pump?.available === true,
+    resume: online && owned && fresh && state.stopped === true && ready.resume?.available === true && (state.mode !== 'auto' || ready.auto?.available === true),
+  };
+}

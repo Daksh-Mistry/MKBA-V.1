@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+from .robot_profile import IR_BLOCKED_VALUE
+
 
 def flag(name, default=False):
     value = os.getenv(name, 'true' if default else 'false').lower()
@@ -27,11 +29,11 @@ class Settings:
     viewer_url: str = 'http://robo.local:8889/cam'
     stream_id: str = 'pi-cam'
     model_id: str = 'fire-smoke-v8n'
-    ir_blocked_value: int | None = None
-    motion_calibrated: bool = False
+    ir_blocked_value: int | None = IR_BLOCKED_VALUE
+    motion_calibrated: bool = True
     auto_calibrated: bool = False
     allow_simulation: bool = False
-    speech_enabled: bool = False
+    speech_enabled: bool = True
     owner_timeout: float = 3.0
     telemetry_timeout: float = 1.0
     drive_input_timeout: float = 0.4
@@ -45,7 +47,7 @@ class Settings:
     def from_env(cls):
         polarity = os.getenv('ROBO_IR_BLOCKED_VALUE', '').strip()
         if polarity not in {'', '0', '1'}:
-            raise ValueError('ROBO_IR_BLOCKED_VALUE must be 0 or 1; blank disables chassis motion')
+            raise ValueError('ROBO_IR_BLOCKED_VALUE must be 0 or 1; blank uses the MKBA V1 active-low profile')
         port = int(os.getenv('ROBO_BACKEND_PORT', '8100'))
         if not 1 <= port <= 65535:
             raise ValueError('ROBO_BACKEND_PORT must be a valid port')
@@ -65,11 +67,11 @@ class Settings:
             host=os.getenv('ROBO_BACKEND_HOST', '127.0.0.1'), port=port,
             service_token=os.getenv('ROBO_SERVICE_TOKEN', ''),
             ml_token=os.getenv('ML_SERVICE_TOKEN', ''),
-            ir_blocked_value=None if not polarity else int(polarity),
-            motion_calibrated=flag('ROBO_MOTION_CALIBRATED'),
+            ir_blocked_value=IR_BLOCKED_VALUE if not polarity else int(polarity),
+            motion_calibrated=flag('ROBO_MOTION_CALIBRATED', True),
             auto_calibrated=flag('ROBO_AUTO_CALIBRATED'),
             allow_simulation=flag('ROBO_ALLOW_SIMULATION'),
-            speech_enabled=flag('ROBO_SPEECH_ENABLED'),
+            speech_enabled=flag('ROBO_SPEECH_ENABLED', True),
             stream_id=os.getenv('ML_STREAM_ID', 'pi-cam'),
             model_id=os.getenv('ROBO_MODEL_ID', 'fire-smoke-v8n'), **urls,
         )

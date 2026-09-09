@@ -23,13 +23,21 @@ class LauncherTests(unittest.TestCase):
         (self.root / "bin").mkdir()
         (self.root / ".venv/bin").mkdir(parents=True)
         shutil.copyfile(Path(__file__).resolve().parents[1] / "start_robo.sh", self.root / "start_robo.sh")
+        self.script(self.root / "setup_pi.sh", 'echo started > setup-started; exit "${MOCK_SETUP_FAIL:-0}"')
         self.script(self.bin / "uname", 'if [[ "$1" == "-s" ]]; then echo Linux; else echo aarch64; fi')
         self.script(self.bin / "dpkg", "echo arm64")
         self.script(self.bin / "flock", "exit 0")
+        self.script(self.bin / "id", '''
+if [[ "$1" == -un ]]; then echo raspberry
+elif [[ "$1" == -nG && $# == 1 ]]; then echo "${MOCK_CURRENT_GROUPS:-gpio i2c video audio}"
+elif [[ "$1" == -nG ]]; then echo "gpio i2c video audio"
+else echo 1000; fi
+''')
         self.script(self.bin / "curl", 'echo "download unavailable for test" >&2; exit 7')
         self.script(self.root / ".venv/bin/python", '''
 if [[ "$1" == "-c" ]]; then
     if [[ "$2" == *"config.CAMERA_ENABLED"* ]]; then exit "${MOCK_CAMERA_DISABLED:-0}"; fi
+    if [[ "$2" == *"print(config.PORT)"* ]]; then echo 8000; fi
     exit 0
 fi
 echo started > api-started
@@ -70,6 +78,52 @@ trap 'echo stopped > camera-stopped; exit 0' TERM INT
         result = self.run_launcher()
         self.assert_api_completed(result)
         self.assertIn("Camera service unavailable", result.stdout)
+        self.assertTrue((self.root / "setup-started").exists())
+
+    def test_failed_optional_setup_keeps_existing_api_running(self):
+        result = self.run_launcher(MOCK_SETUP_FAIL="100", MOCK_CAMERA_DISABLED="1")
+        self.assert_api_completed(result)
+        self.assertIn("setup steps failed", result.stdout)
+
+    def test_api_shutdown_cancels_its_pending_camera_download(self):
+        self.script(self.bin / "curl", '''
+echo started > download-started
+trap 'echo stopped > download-stopped; exit 0' TERM INT
+while :; do sleep 0.1; done
+''')
+        result = self.run_launcher()
+        self.assert_api_completed(result)
+        self.assertTrue((self.root / "download-started").exists())
+        self.assertTrue((self.root / "download-stopped").exists())
+        self.assertFalse(list((self.root / "bin").glob("mediamtx-download.*")))
+
+    def test_new_group_permissions_apply_without_logout(self):
+        self.script(self.bin / "sudo", '''
+printf '%s\\n' "$@" > sudo-args
+shift 3
+exec "$@"
+''')
+        result = self.run_launcher(MOCK_CURRENT_GROUPS="raspberry", MOCK_CAMERA_DISABLED="1", PI_PORT="8000")
+        self.assert_api_completed(result)
+        args = (self.root / "sudo-args").read_text().splitlines()
+        self.assertEqual(args[:4], ["-u", "raspberry", "--", "env"])
+        self.assertIn("PI_PORT=8000", args)
+        self.assertEqual(args[-1], "--prepared")
+        self.assertIn("no logout required", result.stdout)
+
+    def test_local_discovery_lives_and_stops_with_the_launcher(self):
+        self.script(self.bin / "avahi-publish-service", '''
+printf '%s\\n' "$@" > discovery-args
+trap 'echo stopped > discovery-stopped; exit 0' TERM INT
+while :; do sleep 0.1; done
+''')
+        result = self.run_launcher(MOCK_CAMERA_DISABLED="1")
+        self.assert_api_completed(result)
+        args = (self.root / "discovery-args").read_text().splitlines()
+        self.assertEqual(args[0], "--no-fail")
+        self.assertEqual(args[2:4], ["_robo._tcp", "8000"])
+        self.assertIn("system=Robo", args)
+        self.assertTrue((self.root / "discovery-stopped").exists())
 
     def test_wrong_camera_binary_keeps_api_running(self):
         self.camera(version="old-version")

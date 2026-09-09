@@ -15,11 +15,12 @@
       <p class="eyebrow">YOUR ROBOT, CONNECTED</p>
       <h1>Welcome to Robo.</h1>
       <p class="muted">Open your control room to see, move and talk with your robot.</p>
+      <button id="local-connect" class="secondary" type="button" hidden>Open on this computer</button>
       <label for="access-token">Console access token</label>
       <input id="access-token" name="token" type="password" autocomplete="current-password" required maxlength="256" placeholder="Enter your private access token">
       <button id="login-button" class="primary" type="submit">Open control room <span aria-hidden="true">↗</span></button>
       <p id="login-error" class="form-error" role="alert"></p>
-      <p class="micro">Use the console token from Frontend/.env. Your chat API key belongs in the ML service settings.</p>
+      <p class="micro">Local access opens automatically. The token is only for a protected LAN deployment. Chat works without an LLM API key.</p>
     </form>
   </main>
 
@@ -60,6 +61,8 @@
         <div class="speed-row"><label for="speed">Drive speed <output id="speed-value" for="speed">20%</output></label><input id="speed" type="range" min="0.1" max="0.6" step="0.05" value="0.2"></div>
         <div class="actuator-row"><span class="micro">FACE <strong id="servo-position">— / —</strong></span><span class="micro">PUMP <strong id="pump-state">Unknown</strong></span></div>
         <div class="pump-row"><button id="pump-on" class="secondary" disabled>Pump burst</button><button id="pump-off" class="quiet" disabled>Turn pump off</button></div>
+        <p id="hardware-issue" class="panel-note hardware-issue" role="status" hidden></p>
+        <details class="operating-check"><summary>Control availability &amp; auto operating check</summary><pre id="readiness-summary">Waiting for Pi status.</pre><button id="alignment-check" class="secondary small-button" disabled>Confirm camera / nozzle check</button><p class="micro">Services start without setup. For physical operation, trigger and release each IR sensor to verify its input. Confirm camera/nozzle alignment before automatic water spraying. Available face and pump controls work independently.</p></details>
         <p class="panel-note">Release a direction to stop. Stop robot also turns the pump off and centers the face.</p>
       </section>
 

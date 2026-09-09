@@ -43,8 +43,11 @@ export function settingsFromEnvironment(env = process.env) {
     if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin) throw new Error('FRONTEND_ORIGINS must contain exact HTTP origins.');
     origins.add(origin);
   }
-  return { host: env.FRONTEND_HOST || '127.0.0.1', port, backend, uiToken: env.ROBO_UI_TOKEN,
-    serviceToken: env.ROBO_SERVICE_TOKEN, origins, sessionTtlMs: 8 * 3600 * 1000 };
+  const host = env.FRONTEND_HOST || '127.0.0.1';
+  const localAccess = env.FRONTEND_LOCAL_ACCESS === 'true';
+  if (localAccess && !['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('Automatic local access requires a loopback-only frontend.');
+  return { host, port, backend, uiToken: env.ROBO_UI_TOKEN,
+    serviceToken: env.ROBO_SERVICE_TOKEN, origins, sessionTtlMs: 8 * 3600 * 1000, localAccess };
 }
 
 export function createFrontend(settings) {
@@ -111,6 +114,20 @@ export function createFrontend(settings) {
       if (!allowed(req)) return reply(res, 403, { error: 'Origin is not allowed.' });
       const pathname = new URL(req.url, 'http://local').pathname;
       if (req.url.includes('?')) return reply(res, 400, { error: 'Query parameters are not supported.' });
+      if (pathname === '/login/local' && req.method === 'POST') {
+        if (!settings.localAccess) return reply(res, 404, { error: 'Local access is disabled.' });
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) || !allowed(req, true)) {
+          return reply(res, 403, { error: 'Local same-origin access required.' });
+        }
+        await body(req, 2048);
+        const previous = sessionFor(req);
+        if (previous) endSession(previous.id);
+        if (sessions.size >= 128) return reply(res, 503, { error: 'Too many active sessions.' });
+        const id = randomBytes(32).toString('hex');
+        sessions.set(id, { expires: Date.now() + settings.sessionTtlMs, sockets: new Set() });
+        res.setHeader('Set-Cookie', cookie(id, req, Math.floor(settings.sessionTtlMs / 1000)));
+        return reply(res, 200, { authenticated: true, mode: 'local' });
+      }
       if (pathname === '/login' && req.method === 'POST') {
         if (!allowed(req, true)) return reply(res, 403, { error: 'Same-origin login required.' });
         const address = req.socket.remoteAddress;

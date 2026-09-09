@@ -94,7 +94,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.clock, self.pi, self.ml = Clock(), FakePi(), FakeML()
         self.settings = Settings(service_token='test', ir_blocked_value=0,
-                                 motion_calibrated=True, auto_calibrated=True)
+                                 motion_calibrated=True, auto_calibrated=True, speech_enabled=False)
         self.robot = RobotController(self.settings, pi=self.pi, ml=self.ml, clock=self.clock)
         # Drive the fake adapters directly; deterministic tick() replaces wall-clock timer.
         await self.pi.start(self.robot.on_pi)
@@ -201,11 +201,11 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.result()['status'], 'rejected')
         self.assertFalse(any(d.get('left') == 1 for d in self.pi.sent))
 
-    async def test_calibration_gates_chassis_not_face(self):
+    async def test_existing_wiring_profile_does_not_require_environment_gate(self):
         self.robot.settings = replace(self.settings, motion_calibrated=False)
         await self.ready()
         await self.send('drive', direction='forward')
-        self.assertEqual(self.result()['status'], 'rejected')
+        self.assertEqual(self.result()['status'], 'sent_to_pi')
         await self.send('servo', direction='right', degrees=5)
         self.assertEqual(self.pi.sent[-1], {'type': 'servo', 'pan': -5, 'tilt': 0})
 

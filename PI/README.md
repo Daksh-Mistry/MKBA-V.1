@@ -4,9 +4,35 @@ The computer backend sends JSON commands to this server. The Pi controls hardwar
 
 **No Pi token, `.env` file or sensor enable list is required.** Use the same server with a bare Pi, a few components or the complete robot. All eight sensor inputs are attempted automatically. Missing hardware is reported individually and does not prevent the API from starting.
 
-`.venv` holds the Python packages installed on the Pi; it is still needed. The optional `.env` only overrides defaults such as the port or speaker device.
+The launcher creates and repairs `.venv` automatically. The optional `.env` only overrides defaults such as the port or speaker device. No LLM API key is used on the Pi.
 
-**Latest setup repair:** `setup_pi.sh` repairs the GPIO provider and configures I2C/SPI. The launcher now updates an old MediaMTX binary automatically after validating its replacement. API commands/version remain 2.3. For the currently available loose components, use [bench wiring and test order](../Documents/PI_BENCH_WIRING.md), including physical header-pin numbers.
+## Start here: one command
+
+After copying this current `PI/` folder to the Pi, run from that folder as your normal Pi login user:
+
+```bash
+bash start_robo.sh
+```
+
+That same command handles the first installation, later launches and dependency repairs. You do **not** need to run the manual package, environment, camera or speaker setup commands retained below for reference.
+
+The first launch uses the internet and installs the OS/Python packages, replaces the conflicting old `RPi.GPIO` provider with `rpi-lgpio`, enables I2C, disables SPI on the IR sensor pins, and prepares camera, speech and local discovery. Raspberry Pi OS may ask for your normal sudo password while installing OS packages. Later launches reuse the verified environment and do not reinstall or download these packages unless they are missing or the requirements changed.
+
+The launcher applies newly granted GPIO/I2C/video/audio permissions to its own process immediately. Bookworm's interface utility applies I2C/SPI settings live where possible and persists them for later boots; no automatic reboot is performed. If an unusual OS/device state still needs a restart, startup says so and the API continues to report the affected component as unavailable.
+
+MediaMTX is downloaded automatically when missing or outdated, with its release checksum, executable version and configuration checked before replacement. The previous binary is preserved. A missing camera does not stop the Pi API. The speaker uses the OS's default ALSA output; connecting a working audio device is still a physical requirement.
+
+The computer finds this server through `_robo._tcp.local.` discovery, using its actual API port and validating its `system: "Robo"` response. No IP address, token or `.env` editing is needed for the normal setup. The advertisement starts/stops with this launcher, and discovery logs are in `PI/bin/discovery.log`. Both machines must be on the same reachable network; a router can block multicast discovery.
+
+The complete current Pi deployment bundle is [dist/pi-ready.tar.gz](../dist/pi-ready.tar.gz). Copy/extract the bundle on the Pi, then run the command above. Existing `.venv` and optional `.env` files are preserved because the bundle excludes private settings and installed packages. See the [project startup README](../README.md) for the computer's single launcher and automatic Pi discovery.
+
+Startup does not run a motor/pump test. Existing server startup/Stop behavior can center a connected servo. Missing wiring, actuator power or a camera cannot be installed by software; each component's actual status stays visible at `/status` and in the computer UI.
+
+## Earlier setup and diagnostic reference
+
+The detailed installation and bench-test instructions below are retained for troubleshooting and existing deployments. The current `bash start_robo.sh` performs the software setup automatically; optional diagnostics and physical wiring checks are separate from starting the server. Older archive filenames below refer to previous releases; use `dist/pi-ready.tar.gz` for the current complete update.
+
+**Setup repair:** `setup_pi.sh` is now called automatically by the launcher; it repairs the GPIO provider, configures I2C/SPI and installs camera/audio/discovery tools. API commands/version remain 2.3. For the currently available loose components, use [bench wiring and test order](../Documents/PI_BENCH_WIRING.md), including physical header-pin numbers.
 
 ## 1. Copy the update
 
@@ -30,14 +56,14 @@ For a new deployment, copy the whole current `PI/` folder. Git clones do not inc
 
 ## 2. Prepare Bookworm and Python
 
-**Simplest setup/repair:** stop the server first and run these as your normal Pi login user, from `PI/`:
+**Older manual setup/repair reference:** the launcher now performs these setup operations itself. These commands are retained for diagnosing an installation, with the server stopped, as your normal Pi login user from `PI/`:
 
 ```bash
 bash setup_pi.sh
 sudo reboot
 ```
 
-The script installs OS/Python prerequisites, removes conflicting old GPIO packages, reinstalls `rpi-lgpio`, enables I2C, disables SPI, and grants the current user GPIO/I2C access. It preserves `.env`, does not create tokens and does not start actuators. It uses sudo only for OS changes. Run it with the launcher and any directly started server stopped. A reboot applies interface/group changes. Camera and audio tools remain optional. Manual setup details follow for reference; completing the script does not require repeating them.
+The script installs OS/Python prerequisites, removes conflicting old GPIO packages, reinstalls `rpi-lgpio`, enables I2C, disables SPI, and grants GPIO/I2C/video/audio access. Camera, speech and discovery packages are now included. It preserves `.env`, does not create tokens and does not test actuators. It uses sudo only for OS changes. Run standalone repairs with the launcher and any directly started server stopped. A separate reboot is normally unnecessary because the launcher refreshes its own group membership and Bookworm applies interface settings live.
 
 Use **Raspberry Pi OS Bookworm 64-bit** on Pi 5. An existing installation does not need reflashing. Check:
 
@@ -183,6 +209,8 @@ WebRTC also uses UDP 8189. Loading the viewer page does not prove frames are ava
 
 ## Commands and replies
 
+For hands-on tests, use [manual browser-console testing](../Documents/PI_MANUAL_TESTING.md): connection setup with automatic heartbeat, exact JSON messages, short motor/pump tests, sensor readings and Stop. It works with the running server without another Pi update.
+
 Connect to `ws://PI_IP:8000/ws`, without a token or Authorization header. Send one JSON object per WebSocket text message. The computer backend normally owns this single control connection. `/status` remains available alongside it.
 
 | Message to Pi | Effect |
@@ -219,7 +247,7 @@ HTTP endpoints also need no token:
 | `DELETE /speech` | Cancel playback. |
 | `GET /docs` | HTTP API reference. |
 
-See [Pi implementation record](../Documents/PI_PARTIAL_HARDWARE.md) for changes and verification. The computer UI's handling of nullable hardware states is a separate integration task; use Pi `/status` and its diagnostic for partial-hardware checks now.
+See [Pi implementation record](../Documents/PI_PARTIAL_HARDWARE.md) for partial-hardware behavior, and the [project README](../README.md) for the current integrated computer services. Pi `/status` and its diagnostic remain useful independently of the UI.
 
 ## Verification and troubleshooting
 

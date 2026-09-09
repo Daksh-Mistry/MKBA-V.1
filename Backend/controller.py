@@ -12,10 +12,9 @@ from uuid import uuid4
 
 from .auto_policy import AutoPolicy
 from .sensors import SensorProcessor
+from .robot_profile import DRIVE, LOOK, PROFILE_ID, unavailable_hardware, validate_hardware
 
 IDENTIFIER = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$')
-DRIVE = {'forward': (1, -1), 'backward': (-1, 1), 'left': (-1, -1), 'right': (1, 1), 'stop': (0, 0)}
-LOOK = {'left': (1, 0), 'right': (-1, 0), 'up': (0, -1), 'down': (0, 1)}
 
 
 def number(value, name, low, high):
@@ -59,9 +58,12 @@ class RobotController:
         self.pi_safety = {}
         self.pi_trip_count = 0
         self.pi_fault = False
+        self.partial_hardware = False
+        self.hardware = unavailable_hardware()
+        self.alignment_confirmed = False
         self.pi_at = None
-        self.servos = {'pan': 90, 'tilt': 90}
-        self.pump = False
+        self.servos = {'pan': None, 'tilt': None}
+        self.pump = None
         self.sensors = SensorProcessor(settings.ir_blocked_value)
         self.ml_connected = self.ml_ready = False
         self.ml_error = None
@@ -175,10 +177,38 @@ class RobotController:
             raise ValueError('Pi is simulated; explicitly enable simulation in backend settings')
 
     def _motion_ready(self):
-        if not self.settings.motion_calibrated:
-            raise ValueError('Motor directions must be calibrated in backend settings')
+        self._component_ready('motors')
         if not self.sensors.clear(self.clock(), self.settings.telemetry_timeout):
-            raise ValueError('All four IR readings must be fresh, calibrated and clear')
+            if self.sensors.require_signal_evidence and not all(self.sensors.signal_observed):
+                raise ValueError('IR signals are not yet verified: trigger and release each of the four sensors; a steady GPIO input cannot prove a sensor is attached')
+            raise ValueError('All four IR readings must be fresh and clear')
+
+    def _component_ready(self, name):
+        part = self.hardware[name]
+        if not part['available']:
+            raise ValueError(f"{name.capitalize()} unavailable: {part.get('reason') or part['state']}")
+
+    def _auto_ready(self):
+        self._component_ready('servos')
+        self._component_ready('pump')
+        if not (self.alignment_confirmed or self.settings.auto_calibrated):
+            raise ValueError('Confirm the camera/nozzle operating check in the UI before automatic spraying')
+        if not self.sensors.clear(self.clock(), self.settings.telemetry_timeout):
+            raise ValueError('Auto requires four clear IR inputs with observed signal changes')
+        if not self._fresh_detection():
+            raise ValueError('Start vision and wait for fresh ML results before resuming auto')
+
+    def readiness(self):
+        result = {'profile': PROFILE_ID, 'alignment_confirmed': self.alignment_confirmed or self.settings.auto_calibrated}
+        for name, check in (('resume', lambda: None), ('drive', self._motion_ready), ('servo', lambda: self._component_ready('servos')),
+                            ('pump', lambda: self._component_ready('pump')), ('auto', self._auto_ready)):
+            try:
+                self._pi_ready()
+                check()
+                result[name] = {'available': True, 'reason': None}
+            except ValueError as error:
+                result[name] = {'available': False, 'reason': str(error)}
+        return result
 
     async def _send_pi(self, data):
         if not self.pi_connected:
@@ -226,6 +256,7 @@ class RobotController:
         await self._send_pi(self.drive)
 
     async def _servo(self, pan, tilt):
+        self._component_ready('servos')
         now = self.clock()
         if now - self.last_servo < 0.15:
             raise ValueError('Wait before the next face movement')
@@ -233,6 +264,7 @@ class RobotController:
         await self._send_pi({'type': 'servo', 'pan': pan, 'tilt': tilt})
 
     async def _pump(self, duration):
+        self._component_ready('pump')
         if self.pump_until is not None or self.pump:
             raise ValueError('Pump burst already in progress')
         if self.clock() - self.last_pump_off < 3:
@@ -299,6 +331,7 @@ class RobotController:
                     'servo': {'direction', 'degrees'}, 'pump': {'on', 'duration_ms'},
                     'mode': {'value'}, 'system': {'command'}, 'vision': {'command', 'model_id'},
                     'chat': {'message', 'speak'}, 'speech': {'command'}, 'view.status': {'playing'},
+                    'readiness': {'command'},
                 }
                 if not isinstance(kind, str) or kind not in fields or set(data) - (fields.get(kind, set()) | {'type', 'seq', 'request_id'}):
                     raise ValueError('Unknown message type or fields')
@@ -310,6 +343,17 @@ class RobotController:
                     if type(data.get('playing')) is not bool:
                         raise ValueError('playing must be a boolean')
                     self._result(sid, rid, 'accepted', 'Viewer state received; it does not establish ML freshness')
+                    return
+                if kind == 'readiness':
+                    choice(data.get('command'), 'operating check', {'confirm_alignment'})
+                    self._owner_required(sid)
+                    if not self.stopped:
+                        raise ValueError('Stop the robot before confirming its operating check')
+                    self._pi_ready()
+                    self._component_ready('servos')
+                    self._component_ready('pump')
+                    self.alignment_confirmed = True
+                    self._result(sid, rid, 'completed', 'Camera/nozzle operating check recorded for this Pi connection')
                     return
                 if kind == 'system':
                     command = choice(data.get('command'), 'system command', {'stop', 'shutdown'})
@@ -337,12 +381,7 @@ class RobotController:
                         self._owner_required(sid)
                         self._pi_ready()
                         if self.mode == 'auto':
-                            if not self.settings.auto_calibrated:
-                                raise ValueError('Auto requires calibrated camera/nozzle alignment and a controlled test area')
-                            if not self.sensors.clear(self.clock(), self.settings.telemetry_timeout):
-                                raise ValueError('Auto requires calibrated and clear IR sensors')
-                            if not self._fresh_detection():
-                                raise ValueError('Start vision and wait for fresh ML results before resuming auto')
+                            self._auto_ready()
                             self.auto.reset()
                             self.auto.phase = 'observe'
                         self.stopped = False
@@ -395,6 +434,7 @@ class RobotController:
                     direction = choice(data.get('direction'), 'drive direction', DRIVE)
                     speed = number(data.get('speed', 0.2), 'speed', 0, self.settings.maximum_speed)
                     if direction == 'stop' or speed == 0:
+                        self._component_ready('motors')
                         await self._override()
                         await self._send_pi({'type': 'drive', 'left': 0, 'right': 0, 'speed': 0})
                     else:
@@ -419,6 +459,7 @@ class RobotController:
                         await self._override()
                         await self._pump(duration)
                     else:
+                        self._component_ready('pump')
                         self.generation += 1
                         self.pump_until = None
                         self.last_pump_off = self.clock()
@@ -442,6 +483,12 @@ class RobotController:
                 self.pi_trip_count = 0
                 self.pi_safety = {}
                 self.pi_fault = False
+                self.partial_hardware = False
+                self.hardware = unavailable_hardware()
+                self.alignment_confirmed = False
+                self.servos = {'pan': None, 'tilt': None}
+                self.pump = None
+                self.pi_speech = False
                 self.sensors = SensorProcessor(self.settings.ir_blocked_value)
                 if self.pi_connected:
                     await self._stop('Pi connected; explicitly resume')
@@ -450,39 +497,74 @@ class RobotController:
                     self.last_error = event.get('code', 'pi_disconnected')
             elif kind == 'hello':
                 caps = event.get('capabilities', {})
+                if not isinstance(caps, dict):
+                    self.pi_at = None
+                    await self._stop('Malformed Pi capabilities')
+                    return
                 self.pi_watchdog = caps.get('watchdog') is True
                 self.pi_simulation = caps.get('simulation') is True
                 self.pi_speech = caps.get('speech') is True
+                self.partial_hardware = caps.get('partial_hardware') is True
+                self.sensors.require_signal_evidence = self.partial_hardware and not self.pi_simulation
+                if not self.partial_hardware:
+                    # Legacy Pi reports all-or-nothing startup rather than parts.
+                    self.hardware = {name: {'state': 'available', 'available': True,
+                                           'presence': 'legacy_server_not_reported', 'reason': None}
+                                     for name in ('motors', 'servos', 'pump', 'sensors')}
             elif kind == 'status':
                 now = self.clock()
                 servos = event.get('servos', {})
+                if 'hardware' in event:
+                    self.partial_hardware = True
+                    self.sensors.require_signal_evidence = not self.pi_simulation
                 try:
-                    self.servos = {axis: number(servos.get(axis), axis, 0, 180) for axis in ('pan', 'tilt')}
-                    if type(event.get('pump')) is not bool:
+                    hardware = validate_hardware(event.get('hardware'), simulated=self.pi_simulation) if self.partial_hardware or 'hardware' in event else self.hardware
+                    if not isinstance(servos, dict) or not {'pan', 'tilt'} <= set(servos):
+                        raise ValueError('Invalid servo status')
+                    if not hardware['servos']['available'] and any(servos[axis] is not None for axis in ('pan', 'tilt')):
+                        raise ValueError('Unavailable servos must report unknown angles')
+                    angles = {axis: (None if servos.get(axis) is None and not hardware['servos']['available']
+                                     else number(servos.get(axis), axis, 0, 180)) for axis in ('pan', 'tilt')}
+                    if 'pump' not in event or (type(event.get('pump')) is not bool and not (event.get('pump') is None and not hardware['pump']['available'])):
                         raise ValueError('Invalid pump status')
-                except ValueError:
+                    if not hardware['pump']['available'] and event['pump'] is not None:
+                        raise ValueError('Unavailable pump must report unknown state')
+                except (ValueError, TypeError):
+                    self.pi_at = None
                     await self._stop('Malformed Pi telemetry')
                     return
+                lost = [name for name in ('motors', 'servos', 'pump') if self.hardware[name]['available'] and not hardware[name]['available']]
+                self.hardware = hardware
+                self.servos = angles
                 self.pump = event['pump']
                 speech = event.get('speech')
                 if isinstance(speech, dict) and 'available' in speech:
                     self.pi_speech = speech['available'] is True
                 self.pi_at = now
-                self.sensors.update(event.get('sensors'), now)
+                self.sensors.update(event.get('sensors'), now, self.hardware['sensors'])
                 safety = event.get('safety', {})
                 if not isinstance(safety, dict):
+                    self.pi_at = None
                     await self._stop('Malformed Pi safety status')
                     return
-                self.pi_fault = bool(safety.get('faults'))
+                faults = safety.get('faults') or []
+                unavailable = [name for name in ('motors', 'servos', 'pump') if not hardware[name]['available']]
+                isolated_faults = self.partial_hardware and isinstance(faults, list) and all(
+                    isinstance(fault, str) and any(re.search(r'\b' + name + r'\b', fault) for name in unavailable)
+                    for fault in faults)
+                self.pi_fault = bool(faults) and not isolated_faults
                 reason = safety.get('reason')
                 trip_count = safety.get('trip_count', self.pi_trip_count)
                 new_trip = type(trip_count) is int and trip_count > self.pi_trip_count
                 if type(trip_count) is int:
                     self.pi_trip_count = max(self.pi_trip_count, trip_count)
                 self.pi_safety = {'reason': reason if isinstance(reason, str) else None,
-                                  'fault': self.pi_fault, 'trip_count': self.pi_trip_count,
+                                  'fault': self.pi_fault, 'component_faults': bool(faults) and isolated_faults,
+                                  'trip_count': self.pi_trip_count,
                                   'control_lease_valid': safety.get('control_lease_valid') is True}
-                if not self.stopped and (new_trip or self.pi_fault or reason in {
+                if lost:
+                    self.alignment_confirmed = False
+                if not self.stopped and (lost or new_trip or self.pi_fault or reason in {
                     'control_timeout', 'watchdog_hardware_error', 'telemetry_error',
                 }):
                     await self._stop('Pi safety watchdog or hardware fault stopped the robot')
@@ -578,8 +660,7 @@ class RobotController:
                 if self.mode == 'auto' and not self.stopped:
                     try:
                         self._pi_ready()
-                        if not self.sensors.clear(self.clock(), self.settings.telemetry_timeout):
-                            raise ValueError('IR readings are not clear')
+                        self._auto_ready()
                         action = self.auto.step(event, self.clock(), self.servos)
                         if action:
                             if action['kind'] == 'servo':
@@ -623,7 +704,8 @@ class RobotController:
                 session.history.extend([{'role': 'user', 'content': message}, {'role': 'assistant', 'content': text[:2000]}])
                 del session.history[:-12]
                 event = {'type': 'chat.reply', 'request_id': rid, 'text': text, 'action_status': status,
-                         'reason_code': reply.get('reason_code'), 'speech_status': 'not_requested'}
+                         'reason_code': reply.get('reason_code'), 'speech_status': 'not_requested',
+                         'chat_mode': reply.get('chat_mode')}
                 if speak:
                     if self.owner != sid or generation != self.generation or self.stopped:
                         event['speech_status'] = 'blocked'
@@ -723,7 +805,8 @@ class RobotController:
         return {'mode': self.mode, 'pi_connected': self.pi_connected, 'stopped': self.stopped,
                 'state_age_ms': 60000.0 if self.pi_at is None else min(60000.0, max(0.0, (now - self.pi_at) * 1000)),
                 'control_session_id': self.owner, 'operator_has_control': self.owner == sid,
-                'movement_executor_ready': self.pi_watchdog and self._fresh_pi(), 'latest_detection': detection,
+                'movement_executor_ready': self.pi_watchdog and self._fresh_pi() and not self.pi_fault,
+                'latest_detection': detection,
                 'speaker_available': self.settings.speech_enabled and self.pi_speech and self.pi_connected}
 
     async def _tick_loop(self):
@@ -788,14 +871,16 @@ class RobotController:
                 'pi': {'connected': self.pi_connected, 'watchdog': self.pi_watchdog,
                        'age_ms': None if self.pi_at is None else round((now - self.pi_at) * 1000),
                        'simulation': self.pi_simulation, 'speech_available': self.pi_speech,
-                       'safety': dict(self.pi_safety)},
+                       'safety': dict(self.pi_safety), 'hardware': self.hardware},
                 'ml': {'connected': self.ml_connected, 'ready': self.ml_ready, 'model_id': self.model_id,
                        'session_id': self.ml_session, 'fresh': self._fresh_detection(), 'error': self.ml_error,
                        'starting': self.vision_pending is not None or (self.ml_session is not None and not self.ml_ready)},
                 'servos': dict(self.servos), 'pump': self.pump, 'drive_active': self.drive is not None,
                 'sensors': self.sensors.snapshot(now, self.settings.telemetry_timeout), 'auto': self.auto.snapshot(),
+                'readiness': self.readiness(),
                 'calibration': {'motion_calibrated': self.settings.motion_calibrated,
                                 'auto_calibrated': self.settings.auto_calibrated,
+                                'motion_profile_configured': True,
                                 'ir_blocked_value': self.settings.ir_blocked_value,
                                 'simulation_allowed': self.settings.allow_simulation},
                 'speech_enabled': self.settings.speech_enabled, 'last_error': self.last_error}
@@ -810,4 +895,5 @@ class RobotController:
                 'spray_ms': round(self.settings.auto_spray_seconds * 1000),
                 'cooldown_ms': round(self.settings.auto_cooldown_seconds * 1000),
                 'maximum_bursts': 3, 'approach_enabled': False,
-                'calibration_required': not self.settings.auto_calibrated}
+                'calibration_required': not (self.alignment_confirmed or self.settings.auto_calibrated),
+                'readiness': self.readiness()['auto']}
