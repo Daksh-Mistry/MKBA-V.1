@@ -58,8 +58,9 @@ class PanTilt:
                 print("Hardware error for tilt :-", tilt_us)
 
     def center(self):
-        self.pan.angle = self.pan.actuation_range // 2
-        self.tilt.angle = self.tilt.actuation_range // 2
+        if hasattr(self, "pan") and hasattr(self, "tilt") and self.pan is not None and self.tilt is not None:
+            self.pan.angle = self.pan.actuation_range // 2
+            self.tilt.angle = self.tilt.actuation_range // 2
 
 
 

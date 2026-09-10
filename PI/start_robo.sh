@@ -41,8 +41,12 @@ fi
 # environment must never be repaired underneath it.
 mkdir -p bin
 if [[ "${1:-}" != "--prepared" ]]; then
-    echo "Checking Pi setup (details: bin/setup.log)..."
-    if ! bash "$SCRIPT_DIR/setup_pi.sh" > bin/setup.log 2>&1; then
+    echo "Checking Pi setup (logging to bin/setup.log)..."
+    set +e
+    bash "$SCRIPT_DIR/setup_pi.sh" 2>&1 | tee bin/setup.log
+    SETUP_EXIT=${PIPESTATUS[0]}
+    set -e
+    if [[ $SETUP_EXIT -ne 0 ]]; then
         echo "Some Pi setup steps failed; see bin/setup.log. Checking whether the existing API environment can still run."
     fi
 

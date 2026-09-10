@@ -48,7 +48,7 @@ async def send_json(websocket, data):
 
 
 FIELDS = {
-    "drive": {"left", "right", "speed"}, "servo": {"pan", "tilt"},
+    "drive": {"left", "right", "speed"}, "servo": {"pan", "tilt", "action", "center"},
     "pump": {"on"}, "mode": {"value"}, "system": {"command"}, "heartbeat": set(),
 }
 

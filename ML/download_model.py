@@ -187,7 +187,7 @@ def download_model(models_dir: Path = MODEL_DIR, *, opener=None) -> Path:
             "compatible tooling and labeled data; optimizer state for resuming the publisher's "
             "training is not guaranteed. No training was performed by the installer.\n"
         )
-        _atomic_text(weights_dir / f"{MODEL_ID}.README.md", card)
+        _atomic_text(weights_dir / f"{MODEL_ID}.info.txt", card)
         return target
 
 
