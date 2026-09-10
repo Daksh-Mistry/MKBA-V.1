@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .robot_profile import IR_BLOCKED_VALUE

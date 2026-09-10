@@ -9,6 +9,8 @@ from .app import create_app
 
 
 def main():
+    repo_root = Path(__file__).resolve().parent.parent
+    load_dotenv(repo_root / '.env', override=False, interpolate=False)
     load_dotenv(Path(__file__).with_name('.env'), override=False, interpolate=False)
     settings = Settings.from_env()
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port,

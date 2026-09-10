@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from adafruit_servokit import ServoKit
+try:
+    from adafruit_servokit import ServoKit
+except ImportError:
+    ServoKit = None
 
 
 @dataclass

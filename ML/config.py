@@ -48,12 +48,19 @@ class Settings:
         parsed = urlsplit(stream)
         if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.hostname:
             raise ValueError("ML_STREAM_URL must be a configured RTSP source")
-        chat_base = os.getenv("CHAT_BASE_URL", DEFAULT_CHAT_BASE_URL).strip() or DEFAULT_CHAT_BASE_URL
+        chat_api_key = os.getenv("CHAT_API_KEY", "").strip()
+        chat_base = os.getenv("CHAT_BASE_URL", "").strip()
         chat_model = os.getenv("CHAT_MODEL", "").strip()
-        # Older generated .env files used an empty model. At the default endpoint,
-        # adding only the API key now suffices. Custom endpoints keep their model.
-        if not chat_model and chat_base.rstrip("/") == DEFAULT_CHAT_BASE_URL:
-            chat_model = DEFAULT_CHAT_MODEL
+
+        if (chat_api_key.startswith("AQ.") or chat_api_key.startswith("AIza")) and not chat_base:
+            chat_base = "https://generativelanguage.googleapis.com/v1beta/openai"
+            if not chat_model:
+                chat_model = "gemini-2.5-flash"
+        elif not chat_base:
+            chat_base = DEFAULT_CHAT_BASE_URL
+            if not chat_model:
+                chat_model = DEFAULT_CHAT_MODEL
+
         return cls(
             host=os.getenv("ML_HOST", "127.0.0.1"), port=port,
             service_token=os.getenv("ML_SERVICE_TOKEN", ""),
@@ -66,7 +73,7 @@ class Settings:
             robot_name=os.getenv("ROBOT_NAME", "Robo")[:60],
             chat_base_url=chat_base,
             chat_model=chat_model,
-            chat_api_key=os.getenv("CHAT_API_KEY", ""),
+            chat_api_key=chat_api_key,
             chat_timeout=_number("CHAT_TIMEOUT_SECONDS", 20, 1, 60),
             chat_token_limit_field=os.getenv("CHAT_TOKEN_LIMIT_FIELD", "max_tokens"),
         )

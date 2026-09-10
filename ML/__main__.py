@@ -7,6 +7,7 @@ def main() -> None:
     import uvicorn
     from .app import create_app
 
+    load_dotenv(ROOT.parent / ".env", override=False, interpolate=False)
     load_dotenv(ROOT / ".env", override=False, interpolate=False)
     settings = Settings.from_env()
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port,

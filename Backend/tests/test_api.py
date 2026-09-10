@@ -6,7 +6,32 @@ from starlette.websockets import WebSocketDisconnect
 from Backend.app import create_app
 from Backend.config import Settings
 from Backend.controller import RobotController
-from Backend.tests.test_controller import FakeML, FakePi
+class FakePi:
+    async def start(self, callback):
+        pass
+
+    async def send(self, data):
+        pass
+
+    async def close(self):
+        pass
+
+
+class FakeML:
+    async def start(self, callback):
+        pass
+
+    async def send(self, data):
+        pass
+
+    async def models(self):
+        return {'models': []}
+
+    async def chat(self, data):
+        return {'text': 'ok'}
+
+    async def close(self):
+        pass
 
 
 class APITests(unittest.TestCase):
