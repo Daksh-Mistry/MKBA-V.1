@@ -73,6 +73,8 @@ class MotorController:
             if GPIO and self._pwm_left and self._pwm_right:
                 self._pwm_left.stop()
                 self._pwm_right.stop()
+                self._pwm_left = None
+                self._pwm_right = None
                 time.sleep(0.05)
         finally:
             if GPIO:

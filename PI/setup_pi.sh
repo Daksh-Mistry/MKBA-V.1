@@ -26,12 +26,6 @@ from importlib.metadata import PackageNotFoundError, version
 assert sys.prefix != sys.base_prefix
 import fastapi, uvicorn, dotenv, websockets, lgpio, RPi.GPIO, adafruit_servokit
 version("rpi-lgpio")
-try:
-    version("RPi.GPIO")
-except PackageNotFoundError:
-    pass
-else:
-    raise SystemExit("Conflicting RPi.GPIO distribution is installed")
 ' >/dev/null 2>&1
 }
 
